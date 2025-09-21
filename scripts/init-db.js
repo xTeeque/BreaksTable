@@ -16,6 +16,7 @@ if (!existing) {
   console.log("Admin already exists:", email);
 }
 
+// צור משבצות ברירת מחדל (4 אופציות לכל שעה; 2 ראשונות פעילות)
 await db.seedSlotsIfEmpty();
 console.log("Slots seeded (if empty).");
 
