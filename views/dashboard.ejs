@@ -8,66 +8,54 @@
 </head>
 <body data-role="<%= user?.role || 'user' %>">
   <div class="card">
-    <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
-    <p class="muted">לחיצה על משבצת תרשום אותך אליה. אפשר רק משבצת אחת. לחיצה נוספת מסירה את הרישום שלך.</p>
+    <div class="topbar">
+      <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
+      <form method="post" action="/logout">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button type="submit">התנתקות</button>
+      </form>
+    </div>
+    <p class="muted">לחיצה על משבצת פנויה תרשום אותך; אפשר רק משבצת אחת. לחיצה על משבצת שלך תסיר.</p>
 
     <div id="grid" class="grid">
       <% slots.forEach(s => { 
            const taken = !!s.user_id;
-           const mine = s.user_id && s.user_id === user.id;
-           const isTime = s.col_index === 3; /* עמודת השעה */
-           const style = `background:${s.color}`;
+           const mine = s.user_id && user && s.user_id === user.id;
+           const isTime = s.is_time;
+           const bg = taken ? '#86efac' : s.color; // ירוק כשנתפס
+           const disabled = (!isTime && (!s.active || (taken && !mine)));
       %>
-        <div class="cell <%= isTime ? 'time' : '' %> <%= (!mine && taken) ? 'disabled':'' %>"
-             style="<%= style %>"
+        <div class="cell <%= isTime ? 'time' : '' %> <%= mine ? 'mine' : '' %> <%= disabled ? 'disabled' : '' %>"
+             style="background:<%= bg %>"
              data-slot-id="<%= s.slot_id %>"
-             data-reserved-by-me="<%= mine ? '1':'0' %>"
-             data-reserved-by-other="<%= (!mine && taken) ? '1':'0' %>">
-          <div><%= isTime ? s.time_label : (mine ? (s.label || 'משובץ') : (s.label || '')) %></div>
-          <% if (!isTime) { %>
-            <% if (mine) { %>
-              <div class="badge">שייך לך (הסר)</div>
-            <% } else if (taken) { %>
-              <div class="badge">תפוס</div>
-            <% } else { %>
-              <div class="badge">פנוי</div>
-            <% } %>
-            <% if (user && user.role === 'admin' && taken) { %>
-              <div class="badge" data-action="clear" style="background:#111;color:#fff;">נקה (אדמין)</div>
+             data-is-time="<%= isTime ? '1' : '0' %>"
+             data-taken="<%= taken ? '1' : '0' %>"
+             data-mine="<%= mine ? '1' : '0' %>"
+             data-active="<%= s.active ? '1' : '0' %>">
+          <% if (isTime) { %>
+            <div><%= s.time_label %></div>
+          <% } else { %>
+            <div><%= taken ? (s.label || '') : '' %></div>
+            <div class="badge">
+              <% if (mine) { %>שלך (הסר)
+              <% } else if (!s.active) { %>סגור
+              <% } else if (taken) { %>תפוס
+              <% } else { %>פנוי<% } %>
+            </div>
+            <% if (user && user.role === 'admin') { %>
+              <div style="margin-top:6px; display:flex; gap:6px; justify-content:center;">
+                <span class="badge" data-action="clear" style="background:#111;color:#fff;">נקה</span>
+                <% if (s.active) { %>
+                  <span class="badge" data-action="close" style="background:#b91c1c;color:#fff;">סגור</span>
+                <% } else { %>
+                  <span class="badge" data-action="open" style="background:#16a34a;color:#fff;">פתח</span>
+                <% } %>
+              </div>
             <% } %>
           <% } %>
         </div>
       <% }) %>
     </div>
-
-    <% if (user && user.role === 'admin') { %>
-      <div class="admin-tools">
-        <form method="post" action="/admin/slots/update" style="display:flex; gap:8px; flex-wrap:wrap;">
-          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <input name="slot_id" placeholder="Slot ID" required style="padding:6px;">
-          <input name="label" placeholder="Label (טקסט בתא)" style="padding:6px;">
-          <input name="color" placeholder="Color (למשל #ef4444)" style="padding:6px;">
-          <input name="time_label" placeholder="Time (למשל 14:35)" style="padding:6px;">
-          <button type="submit">עדכון תא (אדמין)</button>
-        </form>
-
-        <form method="post" action="/admin/slots/create" style="display:flex; gap:8px; flex-wrap:wrap;">
-          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <input name="label" placeholder="Label" style="padding:6px;" required>
-          <input name="color" placeholder="Color" style="padding:6px;" required>
-          <input name="time_label" placeholder="Time" style="padding:6px;" required>
-          <input name="col_index" placeholder="col (1-3)" style="padding:6px;" required>
-          <input name="row_index" placeholder="row" style="padding:6px;" required>
-          <button type="submit">צור תא חדש (אדמין)</button>
-        </form>
-
-        <form method="post" action="/admin/slots/delete" style="display:flex; gap:8px; flex-wrap:wrap;">
-          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <input name="slot_id" placeholder="Slot ID למחיקה" style="padding:6px;" required>
-          <button type="submit" style="background:#b91c1c;">מחק תא (אדמין)</button>
-        </form>
-      </div>
-    <% } %>
   </div>
 
   <script>window.CSRF_TOKEN = "<%= csrfToken %>"</script>
