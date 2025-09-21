@@ -10,3 +10,39 @@ button { padding: .6rem .75rem; border: 0; border-radius: .5rem; background: #11
 .info { color: #065f46; background: #d1fae5; padding: .5rem .75rem; border-radius: .5rem; }
 a { color: #1d4ed8; text-decoration: none; }
 .row { display:flex; justify-content: space-between; align-items: center; }
+/* קיים אצלך; מוסיף קצת לטבלה */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.cell {
+  padding: 10px 8px;
+  border-radius: 6px;
+  text-align: center;
+  color: #111;
+  user-select: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+.cell.time {
+  cursor: default;
+}
+.cell.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.15);
+}
+.admin-tools {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
