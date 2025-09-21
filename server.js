@@ -13,7 +13,22 @@ import dayjs from "dayjs";
 import { nanoid } from "nanoid";
 import rateLimit from "express-rate-limit";
 
-import db from "./src/db.js"; // Postgres pool + helpers
+import db, {
+  userByEmail,
+  insertUser,
+  insertReset,
+  resetByToken,
+  updateUserPassword,
+  markResetUsed,
+  getSlotsWithReservations,
+  reserveSlot,
+  clearUserReservation,
+  clearSlotReservation,
+  updateSlot,
+  createSlot,
+  deleteSlot,
+} from "./src/db.js";
+
 import { requireAuth, requireRole } from "./src/middleware/auth.js";
 import { sendPasswordReset, sendWelcome } from "./src/mailer.js";
 
@@ -37,7 +52,7 @@ app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(morgan("combined"));
 
-// --- Sessions (stored in Postgres) ---
+// --- Sessions in Postgres ---
 const PgSession = pgSimpleFactory(session);
 app.use(
   session({
@@ -69,17 +84,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- Rate limit על מסלולי auth ---
+// --- Rate limit למסלולי auth ---
 const authLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 app.use(["/login", "/register", "/forgot", "/reset"], authLimiter);
 
-// -------- Routes --------
+// ================== ROUTES ==================
+
+// Root
 app.get("/", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   return res.redirect("/login");
 });
 
-// Login
+// -------- Login --------
 app.get("/login", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.render("login", { error: null });
@@ -95,7 +112,7 @@ app.post(
       return res.status(400).render("login", { error: errors.array()[0].msg });
     }
     const { email, password } = req.body;
-    const user = await db.userByEmail(email);
+    const user = await userByEmail(email);
     if (!user) return res.status(401).render("login", { error: "Invalid credentials" });
 
     const ok = await bcrypt.compare(password, user.password_hash);
@@ -124,7 +141,7 @@ app.post(
   }
 );
 
-// Register
+// -------- Register --------
 app.get("/register", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.render("register", { error: null });
@@ -144,12 +161,12 @@ app.post(
     }
     const { first_name, last_name, email, password } = req.body;
 
-    const exists = await db.userByEmail(email);
+    const exists = await userByEmail(email);
     if (exists) return res.status(400).render("register", { error: "Email already in use" });
 
     const hash = await bcrypt.hash(password, 12);
     const role = "user";
-    const id = await db.insertUser(
+    const id = await insertUser(
       email,
       hash,
       role,
@@ -186,7 +203,7 @@ app.post(
   }
 );
 
-// Forgot password
+// -------- Forgot / Reset --------
 app.get("/forgot", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.render("forgot", { info: null, error: null });
@@ -201,26 +218,24 @@ app.post(
       return res.status(400).render("forgot", { info: null, error: errors.array()[0].msg });
     }
     const { email } = req.body;
-    const user = await db.userByEmail(email);
+    const user = await userByEmail(email);
     if (user) {
       const token = nanoid(48);
       const expires_at = dayjs().add(1, "hour").toISOString();
-      await db.insertReset(user.id, token, expires_at);
+      await insertReset(user.id, token, expires_at);
       try {
         await sendPasswordReset(user.email, token);
       } catch (e) {
         console.error("[MAIL][reset] error:", e?.message || e);
       }
     }
-    // תמיד מחזירים הודעה ניטרלית
     return res.render("forgot", { info: "If the email exists, a reset link has been sent.", error: null });
   }
 );
 
-// Reset password
 app.get("/reset/:token", async (req, res) => {
   const { token } = req.params;
-  const row = await db.resetByToken(token);
+  const row = await resetByToken(token);
   if (!row || dayjs().isAfter(dayjs(row.expires_at)) || row.used) {
     return res.status(400).send("Invalid or expired reset link.");
   }
@@ -238,28 +253,75 @@ app.post(
     if (!errors.isEmpty()) {
       return res.status(400).render("reset", { token, error: errors.array()[0].msg });
     }
-    const row = await db.resetByToken(token);
+    const row = await resetByToken(token);
     if (!row || dayjs().isAfter(dayjs(row.expires_at)) || row.used) {
       return res.status(400).send("Invalid or expired reset link.");
     }
     const hash = await bcrypt.hash(req.body.password, 12);
-    await db.updateUserPassword(row.user_id, hash);
-    await db.markResetUsed(row.id);
+    await updateUserPassword(row.user_id, hash);
+    await markResetUsed(row.id);
     return res.redirect("/login");
   }
 );
 
-// Dashboard
-app.get("/dashboard", requireAuth, (req, res) => {
-  res.render("dashboard");
+// -------- Dashboard + Grid --------
+app.get("/dashboard", requireAuth, async (req, res) => {
+  const slots = await getSlotsWithReservations();
+  res.render("dashboard", { slots });
 });
 
-// Admin example (optional)
+// רשימת פעולות משתמש על משבצות
+app.post("/reserve/:slotId", requireAuth, async (req, res) => {
+  try {
+    const slotId = Number(req.params.slotId);
+    await reserveSlot(req.session.user.id, slotId);
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(400).send("המשבצת תפוסה או בקשה לא חוקית.");
+  }
+});
+
+app.post("/unreserve", requireAuth, async (req, res) => {
+  await clearUserReservation(req.session.user.id);
+  return res.json({ ok: true });
+});
+
+// פעולות אדמין על משבצות
+app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
+  await clearSlotReservation(Number(req.params.slotId));
+  return res.json({ ok: true });
+});
+
+app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
+  const { slot_id, label, color, time_label } = req.body;
+  await updateSlot(Number(slot_id), { label, color, time_label });
+  return res.redirect("/dashboard");
+});
+
+app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
+  const { label, color, time_label, col_index, row_index } = req.body;
+  await createSlot({
+    label,
+    color,
+    time_label,
+    col_index: Number(col_index),
+    row_index: Number(row_index),
+  });
+  return res.redirect("/dashboard");
+});
+
+app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, res) => {
+  const { slot_id } = req.body;
+  await deleteSlot(Number(slot_id));
+  return res.redirect("/dashboard");
+});
+
+// -------- Admin example (optional) --------
 app.get("/admin", requireAuth, requireRole("admin"), (req, res) => {
   res.send("<h1>Admin area</h1><p>Only admins can see this.</p>");
 });
 
-// Logout
+// -------- Logout --------
 app.get("/logout", (req, res) => {
   req.session.destroy(() => {
     res.clearCookie("connect.sid");
