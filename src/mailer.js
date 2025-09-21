@@ -1,36 +1,50 @@
+// src/mailer.js
+import nodemailer from "nodemailer";
 
-import { Resend } from "resend";
-
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
-const FROM = process.env.MAIL_FROM || "no-reply@example.com";
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
+const FROM = process.env.MAIL_FROM || process.env.SMTP_USER;
+
+const SMTP_HOST = process.env.SMTP_HOST;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+
+if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+  console.warn("[MAIL] SMTP not fully configured (SMTP_HOST/USER/PASS). Emails will fail.");
+}
+
+const transporter = nodemailer.createTransport({
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: SMTP_PORT === 465, // true ל-TLS מלא (465), false ל-STARTTLS (587)
+  auth: { user: SMTP_USER, pass: SMTP_PASS }
+});
+
+// פונקציה כללית לשליחה
+async function sendMail(to, subject, html) {
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+    throw new Error("SMTP configuration missing");
+  }
+  const info = await transporter.sendMail({ from: FROM, to, subject, html });
+  console.log("[MAIL] sent:", subject, "->", to, "id:", info.messageId);
+  return info;
+}
 
 export async function sendPasswordReset(to, token) {
-  if (!resend) return;
   const url = `${BASE_URL}/reset/${token}`;
-  try {
-    await resend.emails.send({
-      from: FROM,
-      to,
-      subject: "איפוס סיסמה",
-      html: `<p>קיבלת בקשה לאיפוס סיסמה.</p><p><a href="${url}">לחץ/י כאן לאיפוס</a></p><p>אם לא אתה ביקשת – אפשר להתעלם.</p>`,
-    });
-  } catch (e) {
-    console.error("sendPasswordReset error:", e);
-  }
+  const html = `
+    <p>שלום,</p>
+    <p>התקבלה בקשה לאיפוס הסיסמה שלך.</p>
+    <p><a href="${url}">${url}</a></p>
+    <p>אם לא ביקשת זאת, אפשר להתעלם מהודעה זו.</p>
+  `;
+  return sendMail(to, "איפוס סיסמה", html);
 }
 
 export async function sendWelcome(to, firstName, lastName) {
-  if (!resend) return;
-  try {
-    await resend.emails.send({
-      from: FROM,
-      to,
-      subject: "ברוך/ה הבא/ה!",
-      html: `<p>שלום ${firstName} ${lastName},</p><p>ההרשמה הושלמה בהצלחה. שמחים שהצטרפת.</p>`,
-    });
-  } catch (e) {
-    console.error("sendWelcome error:", e);
-  }
+  const html = `
+    <p>שלום ${firstName} ${lastName},</p>
+    <p>ההרשמה הושלמה בהצלחה. שמחים שהצטרפת!</p>
+  `;
+  return sendMail(to, "ברוך/ה הבא/ה!", html);
 }
