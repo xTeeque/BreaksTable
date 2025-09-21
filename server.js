@@ -1,3 +1,4 @@
+```js
 // server.js
 import express from "express";
 import session from "express-session";
@@ -20,10 +21,13 @@ import db, {
   resetByToken,
   updateUserPassword,
   markResetUsed,
+
+  // grid / slots
   getSlotsWithReservations,
   reserveSlot,
   clearUserReservation,
   clearSlotReservation,
+  setSlotActive,
   updateSlot,
   createSlot,
   deleteSlot,
@@ -40,19 +44,19 @@ const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev_secret_change_me";
 
-// --- Views / static ---
+// ---------- Views / static ----------
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 app.use(express.static(path.join(__dirname, "public")));
 
-// --- Security / parsing / logs ---
+// ---------- Security / parsing / logs ----------
 app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(morgan("combined"));
 
-// --- Sessions in Postgres ---
+// ---------- Sessions stored in Postgres ----------
 const PgSession = pgSimpleFactory(session);
 app.use(
   session({
@@ -73,18 +77,18 @@ app.use(
   })
 );
 
-// --- CSRF ---
+// ---------- CSRF ----------
 const csrfProtection = csrf();
 app.use(csrfProtection);
 
-// --- Locals ---
+// ---------- Locals ----------
 app.use((req, res, next) => {
   res.locals.csrfToken = req.csrfToken();
   res.locals.user = req.session.user || null;
   next();
 });
 
-// --- Rate limit למסלולי auth ---
+// ---------- Rate limit למסלולי auth ----------
 const authLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 app.use(["/login", "/register", "/forgot", "/reset"], authLimiter);
 
@@ -265,19 +269,19 @@ app.post(
 );
 
 // -------- Dashboard + Grid --------
+// מציג טבלה: לכל שעה 4 אופציות (ברירת מחדל 2 פתוחות, 2 סגורות), עמודת השעה מימין
 app.get("/dashboard", requireAuth, async (req, res) => {
   const slots = await getSlotsWithReservations();
   res.render("dashboard", { slots });
 });
 
-// רשימת פעולות משתמש על משבצות
+// משתמש: הרשמה/ביטול
 app.post("/reserve/:slotId", requireAuth, async (req, res) => {
   try {
-    const slotId = Number(req.params.slotId);
-    await reserveSlot(req.session.user.id, slotId);
+    await reserveSlot(req.session.user.id, Number(req.params.slotId));
     return res.json({ ok: true });
   } catch (e) {
-    return res.status(400).send("המשבצת תפוסה או בקשה לא חוקית.");
+    return res.status(400).send(e?.message || "המשבצת תפוסה או לא פעילה.");
   }
 });
 
@@ -286,9 +290,15 @@ app.post("/unreserve", requireAuth, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// פעולות אדמין על משבצות
+// אדמין: ניקוי / פתיחה-סגירה / ניהול
 app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
   await clearSlotReservation(Number(req.params.slotId));
+  return res.json({ ok: true });
+});
+
+app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async (req, res) => {
+  const active = !!req.body.active;
+  await setSlotActive(Number(req.params.slotId), active);
   return res.json({ ok: true });
 });
 
@@ -299,13 +309,15 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
 });
 
 app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
-  const { label, color, time_label, col_index, row_index } = req.body;
+  const { label, color, time_label, col_index, row_index, is_time, active } = req.body;
   await createSlot({
-    label,
-    color,
+    label: label ?? "",
+    color: color ?? "#e5e7eb",
     time_label,
     col_index: Number(col_index),
     row_index: Number(row_index),
+    is_time: is_time === "true",
+    active: active !== "false",
   });
   return res.redirect("/dashboard");
 });
@@ -342,3 +354,4 @@ app.use((req, res) => res.status(404).send("Not Found"));
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
+```
