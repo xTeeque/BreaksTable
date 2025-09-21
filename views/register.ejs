@@ -1,0 +1,33 @@
+
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>הרשמה</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="card">
+    <h1>הרשמה</h1>
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <form method="post" action="/register">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label>שם פרטי</label>
+      <input type="text" name="first_name" required>
+      <label>שם משפחה</label>
+      <input type="text" name="last_name" required>
+      <label>אימייל</label>
+      <input type="email" name="email" required>
+      <label>סיסמה</label>
+      <input type="password" name="password" required minlength="6">
+      <label>אימות סיסמה</label>
+      <input type="password" name="confirm" required minlength="6">
+      <button type="submit">צור חשבון</button>
+    </form>
+    <div class="row">
+      <a href="/login">כבר יש לך חשבון? התחבר</a>
+    </div>
+  </div>
+</body>
+</html>

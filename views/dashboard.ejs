@@ -1,0 +1,17 @@
+
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>דשבורד</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="card">
+    <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
+    <p class="muted">את/ה מחובר/ת. כאן תוכל/י לעצב את העמוד שלך.</p>
+    <p><a href="/logout">התנתקות</a></p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>איפוס סיסמה</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="card">
+    <h1>איפוס סיסמה</h1>
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <% if (info) { %><div class="info"><%= info %></div><% } %>
+    <form method="post" action="/forgot">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label>אימייל</label>
+      <input type="email" name="email" required>
+      <button type="submit">שלח לינק איפוס</button>
+    </form>
+    <div class="row">
+      <a href="/login">חזרה להתחברות</a>
+    </div>
+  </div>
+</body>
+</html>
