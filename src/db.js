@@ -30,15 +30,14 @@ async function init() {
     );
   `);
 
-  -- Slots grid
   await pool.query(`
     CREATE TABLE IF NOT EXISTS slots (
       id SERIAL PRIMARY KEY,
-      label TEXT NOT NULL,        -- טקסט שמופיע בתא (למשל שם)
-      color TEXT NOT NULL,        -- צבע הרקע (css)
-      time_label TEXT NOT NULL,   -- לדוג' "12:50", "13:25" וכו'
-      col_index INT NOT NULL,     -- עמודה (ליישור כמו בתמונה)
-      row_index INT NOT NULL      -- שורה
+      label TEXT NOT NULL,
+      color TEXT NOT NULL,
+      time_label TEXT NOT NULL,
+      col_index INT NOT NULL,
+      row_index INT NOT NULL
     );
   `);
 
@@ -118,12 +117,10 @@ export async function seedSlotsIfEmpty() {
   const countRes = await pool.query(`SELECT COUNT(*)::int AS c FROM slots`);
   if (countRes.rows[0].c > 0) return;
 
-  // גריד בסיסי בסגנון התמונה: 3 עמודות (שמאל = שעה), 2 עמודות צבע, מס' שורות
   const slots = [
-    // row, col, label, color, time
-    { r: 1, c: 1, label: "",     color: "#ef4444", time: "12:50" }, // אדום
-    { r: 1, c: 2, label: "ייטב", color: "#f59e0b", time: "12:50" }, // כתום
-    { r: 1, c: 3, label: "12:50",color: "#fbbf24", time: "12:50" }, // תא שעה
+    { r: 1, c: 1, label: "",     color: "#ef4444", time: "12:50" },
+    { r: 1, c: 2, label: "ייטב", color: "#f59e0b", time: "12:50" },
+    { r: 1, c: 3, label: "12:50",color: "#fbbf24", time: "12:50" },
 
     { r: 2, c: 1, label: "",     color: "#ef4444", time: "13:25" },
     { r: 2, c: 2, label: "עידן", color: "#f59e0b", time: "13:25" },
@@ -164,9 +161,7 @@ export async function clearSlotReservation(slotId) {
 }
 
 export async function reserveSlot(userId, slotId) {
-  // משתמש יכול להחזיק רק משבצת אחת
   await clearUserReservation(userId);
-  // ונרשמים למשבצת אם פנויה (UNIQUE על slot_id ימנע כפילות)
   await pool.query(
     `INSERT INTO reservations (slot_id, user_id) VALUES ($1,$2)`,
     [slotId, userId]
