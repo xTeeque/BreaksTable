@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "init:db": "node scripts/init-db.js"
+    "init:db": "node scripts/init-db.js",
+    "postinstall": "npm run init:db"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
