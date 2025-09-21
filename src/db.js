@@ -1,119 +1,85 @@
+// src/db.js
+import { Pool } from "pg";
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
-import initSqlJs from "sql.js";
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.PGSSLMODE ? { rejectUnauthorized: false } : false,
+});
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const dataDir = path.join(__dirname, "..", "data");
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-const dbPath = path.join(dataDir, "app.sqlite");
-
-let SQL = null;
-let db = null;
-
-function save() {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(dbPath, buffer);
-}
-
-function tableColumns(name) {
-  const res = db.exec(`PRAGMA table_info(${name});`);
-  if (!res || !res[0]) return [];
-  const rows = res[0].values;
-  return rows.map((r) => r[1]);
-}
-
-function ensureSchema() {
-  db.exec(`
+async function init() {
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'user',
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS password_resets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      token TEXT UNIQUE NOT NULL,
-      expires_at TEXT NOT NULL,
-      used INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      first_name TEXT,
+      last_name TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 
-  const cols = tableColumns("users");
-  if (!cols.includes("first_name")) db.exec(`ALTER TABLE users ADD COLUMN first_name TEXT;`);
-  if (!cols.includes("last_name")) db.exec(`ALTER TABLE users ADD COLUMN last_name TEXT;`);
-
-  save();
-}
-
-async function init() {
-  if (!SQL) {
-    SQL = await initSqlJs();
-  }
-  if (fs.existsSync(dbPath)) {
-    const filebuffer = fs.readFileSync(dbPath);
-    db = new SQL.Database(filebuffer);
-    ensureSchema();
-  } else {
-    db = new SQL.Database();
-    ensureSchema();
-  }
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
 }
 
 await init();
 
-function userByEmail(email) {
-  const stmt = db.prepare("SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE email = ?");
-  stmt.bind([email]);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
-  return row;
+// ====== API ======
+export async function userByEmail(email) {
+  const { rows } = await pool.query(
+    `SELECT id, email, password_hash, role, first_name, last_name FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1`,
+    [email]
+  );
+  return rows[0] || null;
 }
 
-function insertUser(email, password_hash, role, created_at, first_name = "", last_name = "") {
-  const stmt = db.prepare("INSERT INTO users (email, password_hash, role, created_at, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?)");
-  stmt.run([email, password_hash, role, created_at, first_name, last_name]);
-  stmt.free();
-  const id = db.exec("SELECT last_insert_rowid() as id")[0].values[0][0];
-  save();
-  return id;
+export async function insertUser(email, password_hash, role, created_at, first_name = "", last_name = "") {
+  const { rows } = await pool.query(
+    `INSERT INTO users (email, password_hash, role, created_at, first_name, last_name)
+     VALUES (LOWER($1), $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [email, password_hash, role, created_at, first_name, last_name]
+  );
+  return rows[0].id;
 }
 
-function insertReset(user_id, token, expires_at) {
-  const stmt = db.prepare("INSERT INTO password_resets (user_id, token, expires_at, used) VALUES (?, ?, ?, 0)");
-  stmt.run([user_id, token, expires_at]);
-  stmt.free();
-  save();
+export async function insertReset(user_id, token, expires_at) {
+  await pool.query(
+    `INSERT INTO password_resets (user_id, token, expires_at, used)
+     VALUES ($1, $2, $3, FALSE)`,
+    [user_id, token, expires_at]
+  );
 }
 
-function resetByToken(token) {
-  const stmt = db.prepare("SELECT * FROM password_resets WHERE token = ?");
-  stmt.bind([token]);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
-  return row;
+export async function resetByToken(token) {
+  const { rows } = await pool.query(
+    `SELECT * FROM password_resets WHERE token=$1 LIMIT 1`,
+    [token]
+  );
+  return rows[0] || null;
 }
 
-function updateUserPassword(user_id, password_hash) {
-  const stmt = db.prepare("UPDATE users SET password_hash = ? WHERE id = ?");
-  stmt.run([password_hash, user_id]);
-  stmt.free();
-  save();
+export async function updateUserPassword(user_id, password_hash) {
+  await pool.query(
+    `UPDATE users SET password_hash=$1 WHERE id=$2`,
+    [password_hash, user_id]
+  );
 }
 
-function markResetUsed(id) {
-  const stmt = db.prepare("UPDATE password_resets SET used = 1 WHERE id = ?");
-  stmt.run([id]);
-  stmt.free();
-  save();
+export async function markResetUsed(id) {
+  await pool.query(
+    `UPDATE password_resets SET used=TRUE WHERE id=$1`,
+    [id]
+  );
 }
 
 export default {
@@ -123,4 +89,5 @@ export default {
   resetByToken,
   updateUserPassword,
   markResetUsed,
+  pool,
 };
