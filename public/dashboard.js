@@ -2,7 +2,10 @@
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-CSRF-Token": window.CSRF_TOKEN },
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": window.CSRF_TOKEN
+    },
     body: JSON.stringify(body || {})
   });
   if (!res.ok) throw new Error(await res.text());
@@ -11,23 +14,40 @@ async function postJSON(url, body) {
 
 document.addEventListener("click", async (e) => {
   const cell = e.target.closest("[data-slot-id]");
-  if (!cell || cell.classList.contains("time")) return;
+  if (!cell) return;
+
+  const isTime = cell.dataset.isTime === "1";
+  if (isTime) return; // לא נרשם לתא שעה
 
   const isAdmin = document.body.dataset.role === "admin";
   const slotId = Number(cell.dataset.slotId);
-  const reservedByMe = cell.dataset.reservedByMe === "1";
-  const reservedByOther = cell.dataset.reservedByOther === "1";
+  const mine = cell.dataset.mine === "1";
+  const taken = cell.dataset.taken === "1";
+  const active = cell.dataset.active === "1";
 
+  // פעולות אדמין (כפתורי נקה/פתיחה/סגירה)
+  if (isAdmin && e.target.closest("[data-action='clear']")) {
+    try { await postJSON(`/admin/slots/${slotId}/clear`, {}); location.reload(); } catch (err) { alert(err.message); }
+    return;
+  }
+  if (isAdmin && e.target.closest("[data-action='open']")) {
+    try { await postJSON(`/admin/slots/${slotId}/active`, { active: true }); location.reload(); } catch (err) { alert(err.message); }
+    return;
+  }
+  if (isAdmin && e.target.closest("[data-action='close']")) {
+    try { await postJSON(`/admin/slots/${slotId}/active`, { active: false }); location.reload(); } catch (err) { alert(err.message); }
+    return;
+  }
+
+  // משתמש רגיל: הרשמה/ביטול
   try {
-    if (isAdmin && e.target.closest("[data-action='clear']")) {
-      await postJSON(`/admin/slots/${slotId}/clear`, {});
-    } else if (!reservedByMe && !reservedByOther) {
+    if (!active) return; // סגור
+    if (!mine && !taken) {
       await postJSON(`/reserve/${slotId}`, {});
-    } else if (reservedByMe) {
+    } else if (mine) {
       await postJSON(`/unreserve`, {});
     } else {
-      // שמור/אל תעשה כלום – התא תפוס ע"י אחר
-      return;
+      return; // תפוס ע"י אחר
     }
     location.reload();
   } catch (err) {
