@@ -31,17 +31,17 @@ async function init() {
     );
   `);
 
-  -- טבלת המשבצות: is_time = תא של שעת תצוגה (לא ניתן לרישום)
+  // טבלת המשבצות: is_time = תא של שעת תצוגה (לא ניתן לרישום)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS slots (
       id SERIAL PRIMARY KEY,
-      label TEXT NOT NULL DEFAULT '',      -- נשאר ריק; כשנרשמים נעדכן לשם המלא
-      color TEXT NOT NULL DEFAULT '#e5e7eb', -- ניטרלי (gray-200)
-      time_label TEXT NOT NULL,            -- "12:50" וכו'
-      col_index INT NOT NULL,              -- 1..4 אופציות, 5 = תא שעה (ימין)
+      label TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT '#e5e7eb',
+      time_label TEXT NOT NULL,
+      col_index INT NOT NULL,
       row_index INT NOT NULL,
       is_time BOOLEAN NOT NULL DEFAULT FALSE,
-      active BOOLEAN NOT NULL DEFAULT TRUE -- רק אופציות; ל-time לא משנה
+      active BOOLEAN NOT NULL DEFAULT TRUE
     );
   `);
 
@@ -123,7 +123,7 @@ export async function seedSlotsIfEmpty() {
   for (let r = 0; r < hours.length; r++) {
     const time = hours[r];
 
-    // 4 אופציות: 1..4 (העמודה הימנית תהיה 5 = שעת התצוגה)
+    // 4 אופציות: 1..4 (העמודה הימנית תהיה 5 = תא הזמן)
     for (let c = 1; c <= 4; c++) {
       const isActive = c <= 2; // שתי אופציות פתוחות כברירת מחדל
       await pool.query(
@@ -164,7 +164,7 @@ export async function deleteSlot(slotId) {
   await pool.query(`DELETE FROM slots WHERE id=$1`, [slotId]);
 }
 
-// עוזר פנימי: נקה רישום של משתמש (ומנקה את הלייבל בתא הישן אם היה)
+// מסיר רישום של המשתמש (ומנקה את הלייבל בתא הישן אם היה)
 export async function clearUserReservation(userId) {
   const { rows } = await pool.query(`DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`, [userId]);
   if (rows.length) {
@@ -173,7 +173,7 @@ export async function clearUserReservation(userId) {
   }
 }
 
-// נקה משבצת ספציפית (ומנקה את הלייבל)
+// מנקה משבצת ספציפית (ומנקה את הלייבל)
 export async function clearSlotReservation(slotId) {
   const { rows } = await pool.query(`DELETE FROM reservations WHERE slot_id=$1 RETURNING user_id`, [slotId]);
   await pool.query(`UPDATE slots SET label='' WHERE id=$1`, [slotId]);
@@ -184,7 +184,7 @@ export async function clearSlotReservation(slotId) {
 export async function reserveSlot(userId, slotId) {
   // ודא שהמשבצת פעילה ואינה תא זמן
   const { rows: srows } = await pool.query(
-    `SELECT id, is_time, active, time_label FROM slots WHERE id=$1`,
+    `SELECT id, is_time, active FROM slots WHERE id=$1`,
     [slotId]
   );
   const slot = srows[0];
@@ -196,10 +196,10 @@ export async function reserveSlot(userId, slotId) {
   // נסה לרשום; UNIQUE ימנע תפיסה כפולה
   await pool.query(`INSERT INTO reservations (slot_id, user_id) VALUES ($1,$2)`, [slotId, userId]);
 
-  // עדכן תצוגת התא לשם הנרשם
+  // עדכן תצוגת התא לשם הנרשם + צבע ירוק
   const { rows: urows } = await pool.query(`SELECT first_name, last_name FROM users WHERE id=$1`, [userId]);
   const fullName = `${urows[0]?.first_name || ""} ${urows[0]?.last_name || ""}`.trim();
-  await pool.query(`UPDATE slots SET label=$1, color='#86efac' WHERE id=$2`, [fullName, slotId]); // ירוק בהיר כשנתפס
+  await pool.query(`UPDATE slots SET label=$1, color='#86efac' WHERE id=$2`, [fullName, slotId]);
 }
 
 export default {
