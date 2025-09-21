@@ -6,7 +6,39 @@ const pool = new Pool({
   ssl: process.env.PGSSLMODE ? { rejectUnauthorized: false } : false,
 });
 
-// ---- Schema init ----
+// ---- Schema init + migrations ----
+async function migrateSlotsSchema() {
+  // צור טבלה אם לא קיימת (בסיס מינימלי)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS slots (
+      id SERIAL PRIMARY KEY,
+      label TEXT,
+      color TEXT,
+      time_label TEXT,
+      col_index INT,
+      row_index INT
+    );
+  `);
+
+  // הוסף/עדכן עמודות חסרות + ברירות מחדל
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS is_time BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS active  BOOLEAN NOT NULL DEFAULT TRUE;`);
+
+  await pool.query(`ALTER TABLE slots ALTER COLUMN label SET DEFAULT '';`);
+  await pool.query(`ALTER TABLE slots ALTER COLUMN color SET DEFAULT '#e5e7eb';`);
+
+  // ודא שעמודות הבאות קיימות (למקרה שמיגרת מקוד עתיק במיוחד)
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS time_label TEXT;`);
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS col_index INT;`);
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS row_index INT;`);
+
+  // ודא שאין NULL היסטוריים שפוגעים בלוגיקה
+  await pool.query(`UPDATE slots SET label = COALESCE(label,'');`);
+  await pool.query(`UPDATE slots SET color = COALESCE(color,'#e5e7eb');`);
+  await pool.query(`UPDATE slots SET active = COALESCE(active, TRUE);`);
+  await pool.query(`UPDATE slots SET is_time = COALESCE(is_time, FALSE);`);
+}
+
 async function init() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -31,19 +63,8 @@ async function init() {
     );
   `);
 
-  // טבלת המשבצות: is_time = תא של שעת תצוגה (לא ניתן לרישום)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS slots (
-      id SERIAL PRIMARY KEY,
-      label TEXT NOT NULL DEFAULT '',
-      color TEXT NOT NULL DEFAULT '#e5e7eb',
-      time_label TEXT NOT NULL,
-      col_index INT NOT NULL,
-      row_index INT NOT NULL,
-      is_time BOOLEAN NOT NULL DEFAULT FALSE,
-      active BOOLEAN NOT NULL DEFAULT TRUE
-    );
-  `);
+  // טבלת משבצות + מיגרציות לעמודות שהתווספו
+  await migrateSlotsSchema();
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS reservations (
@@ -123,16 +144,16 @@ export async function seedSlotsIfEmpty() {
   for (let r = 0; r < hours.length; r++) {
     const time = hours[r];
 
-    // 4 אופציות: 1..4 (העמודה הימנית תהיה 5 = תא הזמן)
+    // 4 אופציות (עמודות 1..4). 1-2 active, 3-4 סגורות.
     for (let c = 1; c <= 4; c++) {
-      const isActive = c <= 2; // שתי אופציות פתוחות כברירת מחדל
+      const isActive = c <= 2;
       await pool.query(
         `INSERT INTO slots (label, color, time_label, col_index, row_index, is_time, active)
          VALUES ('', '#e5e7eb', $1, $2, $3, FALSE, $4)`,
         [time, c, r + 1, isActive]
       );
     }
-    // תא הזמן (ימין)
+    // תא השעה (עמודה 5) – מימין
     await pool.query(
       `INSERT INTO slots (label, color, time_label, col_index, row_index, is_time, active)
        VALUES ($1, '#e5e7eb', $1, 5, $2, TRUE, TRUE)`,
