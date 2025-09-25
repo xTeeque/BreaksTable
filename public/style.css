@@ -32,14 +32,9 @@ a { color: #1d4ed8; text-decoration: none; }
 }
 
 .cell{
-  padding:12px 10px;
-  border-radius:10px;
-  text-align:center;
-  color:#111;
-  user-select:none;
-  font-weight:600;
-  cursor:pointer;
-  background:#e5e7eb; /* ניטרלי */
+  padding:12px 10px;border-radius:10px;text-align:center;color:#111;
+  user-select:none;font-weight:600;cursor:pointer;
+  background:#e0f2fe; /* ← תכלת עדין (במקום #e5e7eb) */
   transition:box-shadow .12s ease, transform .08s ease;
 }
 .cell:hover:not(.time){ box-shadow:0 2px 8px rgba(0,0,0,.12); transform:translateY(-1px); }
