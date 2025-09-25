@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/style.css">
 </head>
 <body data-role="<%= user?.role || 'user' %>">
-  <div class="card">
+  <div class="card" style="max-width:960px">
     <div class="topbar">
       <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
       <form method="post" action="/logout">
@@ -16,39 +16,40 @@
       </form>
     </div>
     <p class="muted">
-      כל שורה = שעה מימין + 4 משבצות משמאל. ניתן להירשם למשבצת אחת. (אדמין: פתיחה/סגירה/ניקוי/עריכת שם)
+      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות. רק משבצת תפוסה נצבעת בירוק.
+      (אדמין: פתיחה/סגירה/ניקוי/עריכת שם)
     </p>
 
     <div id="grid" class="grid">
       <%
+        const HOURS = ["12:50","13:25","14:00","14:35"];
+
         // קיבוץ לפי שעה
-        const grouped = {};
+        const byHour = {};
         slots.forEach(s => {
-          const key = s.time_label;
-          if (!grouped[key]) grouped[key] = [];
-          grouped[key].push(s);
+          if (!byHour[s.time_label]) byHour[s.time_label] = [];
+          byHour[s.time_label].push(s);
         });
 
-        // מיון שעות כרונולוגי (HH:mm)
-        const hours = Object.keys(grouped).sort((a,b)=>{
-          const [ah,am]=a.split(':').map(Number); const [bh,bm]=b.split(':').map(Number);
-          return (ah*60+am)-(bh*60+bm);
-        });
+        // פונקציה: מחזירה בדיוק 4 משבצות לפי col_index 1..4
+        function fourFor(time) {
+          const arr = (byHour[time] || []).slice().sort((a,b)=>(a.col_index||0)-(b.col_index||0));
+          return arr; // מובטח מה־DB שתמיד 4
+        }
       %>
 
-      <% hours.forEach(time => { 
-           // ממיינים לפי col_index – מצפים ל-1..4 (אין פלייסהולדרים)
-           const cells = grouped[time].slice().sort((a,b)=>(a.col_index||0)-(b.col_index||0));
+      <% HOURS.forEach(time => {
+           const cells = fourFor(time);
       %>
-        <!-- תא שעה (מימין) -->
+        <!-- תא שעה מימין -->
         <div class="cell time"><%= time %></div>
 
-        <!-- 4 משבצות משמאל (בהנחה שנורמל ב-DB שיהיו תמיד 4) -->
+        <!-- 4 משבצות משמאל -->
         <% cells.forEach(s => {
              const taken = !!s.user_id;
-             const mine = s.user_id && user && s.user_id === user.id;
+             const mine  = s.user_id && user && s.user_id === user.id;
              const showName = taken || (user && user.role==='admin' && s.label);
-             const bg = taken ? '#86efac' : (s.color || '#e5e7eb');
+             const bg = taken ? '#86efac' : '#e5e7eb'; // ניטרלי תמיד, ירוק רק כשנתפס
              const disabledForUser = (!s.active || (taken && !mine));
         %>
           <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
@@ -83,7 +84,6 @@
   </div>
 
   <script>window.CSRF_TOKEN = "<%= csrfToken %>"</script>
-  <!-- חשוב: לטעון את Socket.IO client לפני dashboard.js -->
   <script src="/socket.io/socket.io.js"></script>
   <script src="/dashboard.js"></script>
 </body>
