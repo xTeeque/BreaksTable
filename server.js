@@ -15,7 +15,8 @@ import rateLimit from "express-rate-limit";
 import httpPkg from "http";
 import { Server as SocketIOServer } from "socket.io";
 
-import db, {
+import {
+  pool,
   userByEmail,
   insertUser,
   insertReset,
@@ -64,7 +65,7 @@ app.use(morgan("combined"));
 const PgSession = pgSimpleFactory(session);
 const sessionMiddleware = session({
   store: new PgSession({
-    pool: db.pool,
+    pool,                 // <<<<<< במקום db.pool
     tableName: "session",
     createTableIfMissing: true,
   }),
@@ -80,7 +81,7 @@ const sessionMiddleware = session({
 });
 app.use(sessionMiddleware);
 
-// (שיתוף סשן עם Socket.IO אם תרצה בעתיד לזהות משתמשים)
+// (אופציונלי: שיתוף סשן עם Socket.IO)
 io.engine.use((req, res, next) => sessionMiddleware(req, res, next));
 
 // ---------- CSRF ----------
@@ -260,12 +261,10 @@ app.post(
 );
 
 // -------- Dashboard + Admin --------
-// הדשבורד הרגיל
 app.get("/dashboard", requireAuth, async (req, res) => {
   const slots = await getSlotsWithReservations();
   res.render("dashboard", { slots });
 });
-// עמוד אדמין – אותה תצוגה בדיוק (ה־view מזהה role=admin ומציג כפתורי ניהול)
 app.get("/admin", requireAuth, requireRole("admin"), async (req, res) => {
   const slots = await getSlotsWithReservations();
   res.render("dashboard", { slots });
@@ -321,7 +320,6 @@ app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, r
     time_label,
     col_index: Number(col_index), // 1..4 בלבד
     row_index: Number(row_index),
-    is_time: false,
     active: active !== "false",
   });
   await broadcastSlots();
