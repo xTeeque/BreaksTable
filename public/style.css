@@ -12,9 +12,9 @@ a { color: #1d4ed8; text-decoration: none; }
 .row { display:flex; justify-content: space-between; align-items: center; }
 .grid {
   display: grid;
-  grid-template-columns: 120px repeat(4, 1fr);
+  grid-template-columns: 120px repeat(4, 1fr); /* שעה + 4 משבצות */
   gap: 6px;
-  direction: rtl; /* כדי שהעמודה הראשונה (שעה) תופיע בצד ימין */
+  direction: rtl; /* כך שהשעה תהיה בצד ימין */
 }
 
 .cell {
@@ -35,6 +35,9 @@ a { color: #1d4ed8; text-decoration: none; }
   background: #f3f4f6;
   font-weight: 700;
   cursor: default;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 
 .cell.disabled {
