@@ -9,6 +9,10 @@
 <body data-role="<%= user?.role || 'user' %>">
   <div class="card" style="max-width:960px">
     <div class="topbar">
+      <% if (user && user.role === 'admin') { %>
+        <button id="btn-clear-all" class="badge danger" style="margin-inline-start:8px">ניקוי כללי</button>
+      <% } %>
+
       <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
       <form method="post" action="/logout">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
