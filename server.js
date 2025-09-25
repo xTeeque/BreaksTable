@@ -327,6 +327,16 @@ app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, r
   return res.redirect("/dashboard");
 });
 
+// אדמין: קבע תצוגת שם (כותב label על המשבצת). אם label ריק – מנקה.
+app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
+  const slotId = Number(req.params.slotId);
+  const label = (req.body.label ?? "").toString().trim();
+  // אם כתבו שם – נציג אותו ונצבע ירוק; אם ריק – נחזור לניטרלי
+  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e5e7eb" });
+  return res.json({ ok: true });
+});
+
+
 // -------- Admin example (optional) --------
 app.get("/admin", requireAuth, requireRole("admin"), (req, res) => {
   res.send("<h1>Admin area</h1><p>Only admins can see this.</p>");
