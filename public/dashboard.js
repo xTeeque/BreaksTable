@@ -43,6 +43,24 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
+  document.addEventListener("click", async (e) => {
+    if (e.target && e.target.id === "btn-clear-all") {
+      if (!confirm("לבצע ניקוי כללי של כל המשבצות?")) return;
+      try {
+        await fetch("/admin/clear-all", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": window.CSRF_TOKEN },
+          body: "{}"
+        });
+        // השרת ישדר sockets:update; בנוסף נרענן מיידית ליתר בטחון
+        location.reload();
+      } catch (err) {
+        alert("נכשל ניקוי כללי");
+      }
+    }
+  });
+
+  
   // משתמש רגיל
   try {
     if (!active) return;             // סגור
