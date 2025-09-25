@@ -43,22 +43,38 @@ document.addEventListener("click", async (e) => {
     return;
   }
 
-  document.addEventListener("click", async (e) => {
-    if (e.target && e.target.id === "btn-clear-all") {
-      if (!confirm("לבצע ניקוי כללי של כל המשבצות?")) return;
-      try {
-        await fetch("/admin/clear-all", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-CSRF-Token": window.CSRF_TOKEN },
-          body: "{}"
-        });
-        // השרת ישדר sockets:update; בנוסף נרענן מיידית ליתר בטחון
-        location.reload();
-      } catch (err) {
-        alert("נכשל ניקוי כללי");
-      }
+  // כפתור ניקוי כללי לאדמין
+document.addEventListener("click", async (e) => {
+  const clearBtn = e.target.closest("#btn-clear-all");
+  if (!clearBtn) return;
+
+  e.preventDefault();
+
+  if (!confirm("לבצע ניקוי כללי של כל המשבצות?")) return;
+
+  try {
+    const res = await fetch("/admin/clear-all", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": window.CSRF_TOKEN
+      },
+      body: "{}"
+    });
+
+    if (!res.ok) {
+      const t = await res.text().catch(()=>"");
+      throw new Error(t || ("HTTP " + res.status));
     }
-  });
+
+    // השרת גם משדר Socket.IO, אבל נרענן מיד ליתר ביטחון
+    location.reload();
+  } catch (err) {
+    alert("נכשל ניקוי כללי: " + (err.message || err));
+  }
+});
+
 
   
   // משתמש רגיל
