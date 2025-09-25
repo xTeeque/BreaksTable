@@ -143,11 +143,11 @@ export async function seedSlotsIfEmpty() {
   const countRes = await pool.query(`SELECT COUNT(*)::int AS c FROM slots`);
   if (countRes.rows[0].c > 0) return;
 
-  const hours = ["12:50", "13:25", "14:00", "14:35"];
-  for (let r = 0; r < hours.length; r++) {
-    const time = hours[r];
+  const HOURS = ["12:50", "13:25", "14:00", "14:35"];
+  for (let r = 0; r < HOURS.length; r++) {
+    const time = HOURS[r];
     for (let c = 1; c <= 4; c++) {
-      const isActive = c <= 2; // שתי משבצות פתוחות כברירת מחדל
+      const isActive = c <= 2; // בדיוק 2 פתוחות + 2 סגורות
       await pool.query(
         `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
          VALUES ('', '#e5e7eb', $1, $2, $3, $4)`,
@@ -159,25 +159,19 @@ export async function seedSlotsIfEmpty() {
 
 /** נרמול: מבטיח שבכל שעה יש בדיוק col_index 1..4 (2 פתוחות, 2 סגורות) */
 export async function normalizeSlotsToFour() {
-  const timesRes = await pool.query(`SELECT DISTINCT time_label FROM slots ORDER BY time_label ASC`);
-  const times = timesRes.rows.map(r => r.time_label);
+  // ננקה שורות לא חוקיות
+  await pool.query(`DELETE FROM slots WHERE time_label IS NULL OR TRIM(time_label) = ''`);
 
-  if (times.length === 0) {
-    await seedSlotsIfEmpty();
-    return;
-  }
+  const HOURS = ["12:50", "13:25", "14:00", "14:35"];
+  // מחק שעות שלא ברשימה (כדי שלא תופיע שורה נוספת למטה)
+  await pool.query(`DELETE FROM slots WHERE time_label NOT IN (${HOURS.map((_,i)=>`$${i+1}`).join(',')})`, HOURS);
 
-  const maxRowRes = await pool.query(`SELECT COALESCE(MAX(row_index),0)::int AS max_row FROM slots`);
-  let nextRow = maxRowRes.rows[0].max_row + 1;
+  // ודא שיש row_index ייחודי לכל שעה
+  for (let i = 0; i < HOURS.length; i++) {
+    const time = HOURS[i];
+    const rowIndex = i + 1;
 
-  for (const time of times) {
-    const rowRes = await pool.query(
-      `SELECT row_index FROM slots WHERE time_label=$1 ORDER BY row_index ASC LIMIT 1`,
-      [time]
-    );
-    const rowIndex = rowRes.rows[0]?.row_index ?? nextRow++;
-
-    // צור חסרות
+    // צור חסרות 1..4, עם 2 פתוחות
     for (let ci = 1; ci <= 4; ci++) {
       const { rows } = await pool.query(
         `SELECT id FROM slots WHERE time_label=$1 AND col_index=$2 LIMIT 1`,
@@ -190,16 +184,29 @@ export async function normalizeSlotsToFour() {
            VALUES ('', '#e5e7eb', $1, $2, $3, $4)`,
           [time, ci, rowIndex, isActive]
         );
+      } else {
+        // יישור צבע ניטרלי למצבים לא-תפוסים
+        await pool.query(
+          `UPDATE slots SET row_index=$1, color='#e5e7eb' WHERE id=$2 AND NOT EXISTS (SELECT 1 FROM reservations WHERE slot_id=$2)`,
+          [rowIndex, rows[0].id]
+        );
       }
     }
 
-    // מחק עודפים
+    // מחק עודפים (כל col_index שאינו 1..4)
     await pool.query(
       `DELETE FROM slots WHERE time_label=$1 AND (col_index < 1 OR col_index > 4)`,
       [time]
     );
+
+    // קבע אקטיביות: בדיוק 2 ראשונות פתוחות, 2 אחרונות סגורות (אם לא תפוסות)
+    await pool.query(
+      `UPDATE slots SET active = CASE WHEN col_index IN (1,2) THEN TRUE ELSE FALSE END WHERE time_label=$1`,
+      [time]
+    );
   }
 }
+
 
 export async function setSlotActive(slotId, active) {
   await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [!!active, slotId]);
@@ -230,20 +237,18 @@ export async function clearUserReservation(userId) {
     [userId]
   );
   if (rows.length) {
-    await pool.query(`UPDATE slots SET label='' WHERE id=$1`, [rows[0].slot_id]);
+    await pool.query(`UPDATE slots SET label='', color='#e5e7eb' WHERE id=$1`, [rows[0].slot_id]);
   }
 }
 
 export async function clearSlotReservation(slotId) {
   await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
-  await pool.query(`UPDATE slots SET label='' WHERE id=$1`, [slotId]);
+  await pool.query(`UPDATE slots SET label='', color='#e5e7eb' WHERE id=$1`, [slotId]);
 }
 
 export async function reserveSlot(userId, slotId) {
-  // מנקה רישום קודם (משבצת אחת למשתמש)
-  await clearUserReservation(userId);
+  await clearUserReservation(userId); // משבצת אחת למשתמש
 
-  // מוודא שהמשבצת קיימת ופעילה
   const { rows: srows } = await pool.query(
     `SELECT id, active FROM slots WHERE id=$1`,
     [slotId]
@@ -251,10 +256,8 @@ export async function reserveSlot(userId, slotId) {
   const slot = srows[0];
   if (!slot || !slot.active) throw new Error("Slot is not active");
 
-  // רושם
   await pool.query(`INSERT INTO reservations (slot_id, user_id) VALUES ($1, $2)`, [slotId, userId]);
 
-  // מעדכן label לצורך תצוגה + צובע ירוק
   const { rows: urows } = await pool.query(
     `SELECT first_name, last_name FROM users WHERE id=$1`,
     [userId]
