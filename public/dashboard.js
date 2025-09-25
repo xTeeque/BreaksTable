@@ -1,5 +1,8 @@
 // public/dashboard.js
 /* global io */
+function safeIO() {
+  try { return typeof io !== "undefined" ? io : null; } catch { return null; }
+}
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: "POST",
