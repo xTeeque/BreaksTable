@@ -268,13 +268,13 @@ app.post(
 );
 
 // -------- Dashboard + Grid --------
-// מציג טבלה: לכל שעה 4 אופציות (ברירת מחדל 2 פתוחות, 2 סגורות), עמודת השעה מימין
+// הצגה: עמודת שעה מימין + 4 משבצות משמאל (הקיבוץ לפי time_label נעשה ב-EJS)
 app.get("/dashboard", requireAuth, async (req, res) => {
   const slots = await getSlotsWithReservations();
   res.render("dashboard", { slots });
 });
 
-// משתמש: הרשמה/ביטול
+// משתמש: הרשמה/ביטול (משבצת אחת למשתמש)
 app.post("/reserve/:slotId", requireAuth, async (req, res) => {
   try {
     await reserveSlot(req.session.user.id, Number(req.params.slotId));
@@ -289,7 +289,7 @@ app.post("/unreserve", requireAuth, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// אדמין: ניקוי / פתיחה-סגירה / ניהול
+// אדמין: ניקוי, פתיחה/סגירה, כתיבת שם ידני
 app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
   await clearSlotReservation(Number(req.params.slotId));
   return res.json({ ok: true });
@@ -301,6 +301,15 @@ app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async
   return res.json({ ok: true });
 });
 
+// כתיבת label ידנית (אם ריק – מחזיר לצבע ניטרלי)
+app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
+  const slotId = Number(req.params.slotId);
+  const label = (req.body.label ?? "").toString().trim();
+  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e5e7eb" });
+  return res.json({ ok: true });
+});
+
+// (אופציונלי) אדמין: עדכון/יצירה/מחיקה גנריים
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const { slot_id, label, color, time_label } = req.body;
   await updateSlot(Number(slot_id), { label, color, time_label });
@@ -308,14 +317,14 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
 });
 
 app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
-  const { label, color, time_label, col_index, row_index, is_time, active } = req.body;
+  const { label, color, time_label, col_index, row_index, active } = req.body;
   await createSlot({
     label: label ?? "",
     color: color ?? "#e5e7eb",
     time_label,
-    col_index: Number(col_index),
-    row_index: Number(row_index),
-    is_time: is_time === "true",
+    col_index: Number(col_index),   // 1..4 בלבד (אין תאי שעה ב־DB)
+    row_index: Number(row_index),   // שורת השעה
+    is_time: false,
     active: active !== "false",
   });
   return res.redirect("/dashboard");
@@ -325,21 +334,6 @@ app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, r
   const { slot_id } = req.body;
   await deleteSlot(Number(slot_id));
   return res.redirect("/dashboard");
-});
-
-// אדמין: קבע תצוגת שם (כותב label על המשבצת). אם label ריק – מנקה.
-app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
-  const slotId = Number(req.params.slotId);
-  const label = (req.body.label ?? "").toString().trim();
-  // אם כתבו שם – נציג אותו ונצבע ירוק; אם ריק – נחזור לניטרלי
-  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e5e7eb" });
-  return res.json({ ok: true });
-});
-
-
-// -------- Admin example (optional) --------
-app.get("/admin", requireAuth, requireRole("admin"), (req, res) => {
-  res.send("<h1>Admin area</h1><p>Only admins can see this.</p>");
 });
 
 // -------- Logout --------
