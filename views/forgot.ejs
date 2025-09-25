@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
@@ -10,17 +9,14 @@
 <body>
   <div class="card">
     <h1>איפוס סיסמה</h1>
-    <% if (error) { %><div class="error"><%= error %></div><% } %>
-    <% if (info) { %><div class="info"><%= info %></div><% } %>
+    <% if (info)  { %><p class="info"><%= info %></p><% } %>
+    <% if (error) { %><p class="error"><%= error %></p><% } %>
     <form method="post" action="/forgot">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <label>אימייל</label>
-      <input type="email" name="email" required>
-      <button type="submit">שלח לינק איפוס</button>
+      <div><label>אימייל</label><br><input name="email" type="email" required></div>
+      <button type="submit">שלח קישור איפוס</button>
     </form>
-    <div class="row">
-      <a href="/login">חזרה להתחברות</a>
-    </div>
+    <p><a href="/login">חזרה להתחברות</a></p>
   </div>
 </body>
 </html>
