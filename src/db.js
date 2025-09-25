@@ -24,9 +24,9 @@ async function migrateSlotsSchema() {
   // עמודות ותיקוני ברירת מחדל
   await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;`);
   await pool.query(`ALTER TABLE slots ALTER COLUMN label SET DEFAULT '';`);
-  await pool.query(`ALTER TABLE slots ALTER COLUMN color SET DEFAULT '#e5e7eb';`);
+  await pool.query(`ALTER TABLE slots ALTER COLUMN color SET DEFAULT '#e0f2fe';`);
   await pool.query(`UPDATE slots SET label = COALESCE(label,'');`);
-  await pool.query(`UPDATE slots SET color = COALESCE(color,'#e5e7eb');`);
+  await pool.query(`UPDATE slots SET color = COALESCE(color,'#e0f2fe');`);
   await pool.query(`UPDATE slots SET active = COALESCE(active, TRUE);`);
 }
 
@@ -150,7 +150,7 @@ export async function seedSlotsIfEmpty() {
       const isActive = c <= 2; // בדיוק 2 פתוחות + 2 סגורות
       await pool.query(
         `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
-         VALUES ('', '#e5e7eb', $1, $2, $3, $4)`,
+         VALUES ('', '#e0f2fe', $1, $2, $3, $4)`,
         [time, c, r + 1, isActive]
       );
     }
@@ -181,13 +181,13 @@ export async function normalizeSlotsToFour() {
         const isActive = ci <= 2;
         await pool.query(
           `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
-           VALUES ('', '#e5e7eb', $1, $2, $3, $4)`,
+           VALUES ('', '#e0f2fe', $1, $2, $3, $4)`,
           [time, ci, rowIndex, isActive]
         );
       } else {
         // יישור צבע ניטרלי למצבים לא-תפוסים
         await pool.query(
-          `UPDATE slots SET row_index=$1, color='#e5e7eb' WHERE id=$2 AND NOT EXISTS (SELECT 1 FROM reservations WHERE slot_id=$2)`,
+          `UPDATE slots SET row_index=$1, color='#e0f2fe' WHERE id=$2 AND NOT EXISTS (SELECT 1 FROM reservations WHERE slot_id=$2)`,
           [rowIndex, rows[0].id]
         );
       }
@@ -212,14 +212,14 @@ export async function setSlotActive(slotId, active) {
   await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [!!active, slotId]);
 }
 
-export async function updateSlot(slotId, { label = "", color = "#e5e7eb", time_label }) {
+export async function updateSlot(slotId, { label = "", color = "#e0f2fe", time_label }) {
   await pool.query(
     `UPDATE slots SET label=$1, color=$2, time_label=COALESCE($3, time_label) WHERE id=$4`,
     [label, color, time_label || null, slotId]
   );
 }
 
-export async function createSlot({ label = "", color = "#e5e7eb", time_label, col_index, row_index, active = true }) {
+export async function createSlot({ label = "", color = "#e0f2fe", time_label, col_index, row_index, active = true }) {
   await pool.query(
     `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
      VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -237,13 +237,13 @@ export async function clearUserReservation(userId) {
     [userId]
   );
   if (rows.length) {
-    await pool.query(`UPDATE slots SET label='', color='#e5e7eb' WHERE id=$1`, [rows[0].slot_id]);
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [rows[0].slot_id]);
   }
 }
 
 export async function clearSlotReservation(slotId) {
   await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
-  await pool.query(`UPDATE slots SET label='', color='#e5e7eb' WHERE id=$1`, [slotId]);
+  await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [slotId]);
 }
 
 export async function reserveSlot(userId, slotId) {
