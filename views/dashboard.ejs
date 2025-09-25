@@ -15,17 +15,22 @@
         <button type="submit">התנתקות</button>
       </form>
     </div>
-    <p class="muted">לחיצה על משבצת פנויה תרשום אותך; אפשר רק משבצת אחת. לחיצה על משבצת שלך תסיר.</p>
+    <p class="muted">
+      אפשר להירשם למשבצת אחת בלבד. לחיצה על משבצת פנויה תרשום אותך; לחיצה על המשבצת שלך תסיר אותך.
+      (אדמין יכול לפתוח/לסגור/לנקות וגם לערוך שם)
+    </p>
 
-    <div id="grid" class="grid">
+    <!-- כדי להבטיח שהעמודה של השעה תישב מימין גם בעמוד RTL -->
+    <div id="grid" class="grid" dir="ltr">
       <% slots.forEach(s => { 
            const taken = !!s.user_id;
            const mine = s.user_id && user && s.user_id === user.id;
-           const isTime = s.is_time;
-           const bg = taken ? '#86efac' : s.color; // ירוק כשנתפס
-           const disabled = (!isTime && (!s.active || (taken && !mine)));
+           const isTime = !!s.is_time;
+           const showName = taken || (user && user.role === 'admin' && s.label); // אדמין רואה שם אם כתב ידנית
+           const bg = taken ? '#86efac' : (s.color || '#e5e7eb'); // ירוק כשנתפס
+           const disabledForUser = (!isTime && (!s.active || (taken && !mine)));
       %>
-        <div class="cell <%= isTime ? 'time' : '' %> <%= mine ? 'mine' : '' %> <%= disabled ? 'disabled' : '' %>"
+        <div class="cell <%= isTime ? 'time' : '' %> <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
              style="background:<%= bg %>"
              data-slot-id="<%= s.slot_id %>"
              data-is-time="<%= isTime ? '1' : '0' %>"
@@ -33,23 +38,25 @@
              data-mine="<%= mine ? '1' : '0' %>"
              data-active="<%= s.active ? '1' : '0' %>">
           <% if (isTime) { %>
-            <div><%= s.time_label %></div>
+            <div class="time-text"><%= s.time_label %></div>
           <% } else { %>
-            <div><%= taken ? (s.label || '') : '' %></div>
+            <div class="slot-text"><%= showName ? (s.label || '') : '' %></div>
             <div class="badge">
               <% if (mine) { %>שלך (הסר)
               <% } else if (!s.active) { %>סגור
               <% } else if (taken) { %>תפוס
               <% } else { %>פנוי<% } %>
             </div>
+
             <% if (user && user.role === 'admin') { %>
-              <div style="margin-top:6px; display:flex; gap:6px; justify-content:center;">
-                <span class="badge" data-action="clear" style="background:#111;color:#fff;">נקה</span>
+              <div class="admin-actions">
+                <span class="badge" data-action="clear">נקה</span>
                 <% if (s.active) { %>
-                  <span class="badge" data-action="close" style="background:#b91c1c;color:#fff;">סגור</span>
+                  <span class="badge danger" data-action="close">סגור</span>
                 <% } else { %>
-                  <span class="badge" data-action="open" style="background:#16a34a;color:#fff;">פתח</span>
+                  <span class="badge success" data-action="open">פתח</span>
                 <% } %>
+                <span class="badge info" data-action="label">ערוך שם</span>
               </div>
             <% } %>
           <% } %>
