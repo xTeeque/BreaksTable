@@ -4,7 +4,7 @@ import {
   userByEmail,
   insertUser,
   seedSlotsIfEmpty,
-  normalizeSlotsToFour, // חשוב: אם הוספנו פונקציה זו ב-db.js
+  normalizeSlotsToFour,
 } from "../src/db.js";
 import bcrypt from "bcryptjs";
 
@@ -30,14 +30,7 @@ async function ensureAdmin() {
 }
 
 await ensureAdmin();
-
-// זרע ברירות מחדל אם הטבלה ריקה
 await seedSlotsIfEmpty();
-
-// יישור נתונים: ודא שתמיד יש 4 משבצות לכל שעה (2 פתוחות, 2 סגורות)
-if (typeof normalizeSlotsToFour === "function") {
-  await normalizeSlotsToFour();
-}
-
+await normalizeSlotsToFour(); // מבטיח 4 משבצות לשעה (2 פתוחות, 2 סגורות)
 console.log("Init DB done.");
 process.exit(0);
