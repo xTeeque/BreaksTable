@@ -54,10 +54,9 @@ document.addEventListener("click", async (e) => {
 
 // ---- Socket.IO: האזנה לעדכונים ושידרוג UI מיידי ----
 (function initRealtime(){
-  const socket = io({ transports: ["websocket", "polling"] });
-  socket.on("connect", () => {});
-  socket.on("slots:update", () => {
-    // הכי פשוט ובטוח כנגד מצבים — רענון מהיר
-    location.reload();
-  });
+  const IO = safeIO();
+  if (!IO) return; // אם לא נטען הלקוח, דלג בשקט
+  const socket = IO({ transports: ["websocket", "polling"] });
+  socket.on("slots:update", () => { location.reload(); });
 })();
+
