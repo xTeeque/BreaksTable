@@ -12,6 +12,8 @@ import bcrypt from "bcryptjs";
 import dayjs from "dayjs";
 import { nanoid } from "nanoid";
 import rateLimit from "express-rate-limit";
+import httpPkg from "http";
+import { Server as SocketIOServer } from "socket.io";
 
 import db, {
   userByEmail,
@@ -20,8 +22,6 @@ import db, {
   resetByToken,
   updateUserPassword,
   markResetUsed,
-
-  // grid / slots
   getSlotsWithReservations,
   reserveSlot,
   clearUserReservation,
@@ -39,6 +39,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const server = httpPkg.createServer(app);
+const io = new SocketIOServer(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] },
+});
+
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev_secret_change_me";
@@ -57,24 +62,26 @@ app.use(morgan("combined"));
 
 // ---------- Sessions stored in Postgres ----------
 const PgSession = pgSimpleFactory(session);
-app.use(
-  session({
-    store: new PgSession({
-      pool: db.pool,
-      tableName: "session",
-      createTableIfMissing: true,
-    }),
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: NODE_ENV === "production",
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
-    },
-  })
-);
+const sessionMiddleware = session({
+  store: new PgSession({
+    pool: db.pool,
+    tableName: "session",
+    createTableIfMissing: true,
+  }),
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: NODE_ENV === "production",
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+  },
+});
+app.use(sessionMiddleware);
+
+// (שיתוף סשן עם Socket.IO אם תרצה בעתיד לזהות משתמשים)
+io.engine.use((req, res, next) => sessionMiddleware(req, res, next));
 
 // ---------- CSRF ----------
 const csrfProtection = csrf();
@@ -91,9 +98,14 @@ app.use((req, res, next) => {
 const authLimiter = rateLimit({ windowMs: 60_000, max: 20 });
 app.use(["/login", "/register", "/forgot", "/reset"], authLimiter);
 
+// ---------- Helper: שידור עדכון לכולם ----------
+async function broadcastSlots() {
+  const slots = await getSlotsWithReservations();
+  io.emit("slots:update", { slots });
+}
+
 // ================== ROUTES ==================
 
-// Root
 app.get("/", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   return res.redirect("/login");
@@ -104,7 +116,6 @@ app.get("/login", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.render("login", { error: null });
 });
-
 app.post(
   "/login",
   body("email").isEmail().withMessage("Email is invalid"),
@@ -149,7 +160,6 @@ app.get("/register", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.render("register", { error: null });
 });
-
 app.post(
   "/register",
   body("first_name").trim().notEmpty().withMessage("First name is required"),
@@ -195,11 +205,7 @@ app.post(
           console.error("Session save error:", err2);
           return res.status(500).render("register", { error: "Server error (session save)" });
         }
-        try {
-          await sendWelcome(email.toLowerCase(), first_name.trim(), last_name.trim());
-        } catch (e) {
-          console.error("[MAIL][welcome] error:", e?.message || e);
-        }
+        try { await sendWelcome(email.toLowerCase(), first_name.trim(), last_name.trim()); } catch {}
         return res.redirect("/dashboard");
       });
     });
@@ -211,52 +217,38 @@ app.get("/forgot", (req, res) => {
   if (req.session.user) return res.redirect("/dashboard");
   res.render("forgot", { info: null, error: null });
 });
-
-app.post(
-  "/forgot",
-  body("email").isEmail().withMessage("Email is invalid"),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).render("forgot", { info: null, error: errors.array()[0].msg });
-    }
-    const { email } = req.body;
-    const user = await userByEmail(email);
-    if (user) {
-      const token = nanoid(48);
-      const expires_at = dayjs().add(1, "hour").toISOString();
-      await insertReset(user.id, token, expires_at);
-      try {
-        await sendPasswordReset(user.email, token);
-      } catch (e) {
-        console.error("[MAIL][reset] error:", e?.message || e);
-      }
-    }
-    return res.render("forgot", { info: "If the email exists, a reset link has been sent.", error: null });
+app.post("/forgot", body("email").isEmail(), async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).render("forgot", { info: null, error: errors.array()[0].msg });
   }
-);
-
+  const { email } = req.body;
+  const user = await userByEmail(email);
+  if (user) {
+    const token = nanoid(48);
+    const expires_at = dayjs().add(1, "hour").toISOString();
+    await insertReset(user.id, token, expires_at);
+    try { await sendPasswordReset(user.email, token); } catch {}
+  }
+  return res.render("forgot", { info: "If the email exists, a reset link has been sent.", error: null });
+});
 app.get("/reset/:token", async (req, res) => {
-  const { token } = req.params;
-  const row = await resetByToken(token);
+  const row = await resetByToken(req.params.token);
   if (!row || dayjs().isAfter(dayjs(row.expires_at)) || row.used) {
     return res.status(400).send("Invalid or expired reset link.");
   }
-  res.render("reset", { token, error: null });
+  res.render("reset", { token: req.params.token, error: null });
 });
-
 app.post(
   "/reset/:token",
-  body("password").isLength({ min: 6 }).withMessage("Password must be at least 6 chars"),
-  body("confirm").custom((val, { req }) => val === req.body.password).withMessage("Passwords do not match"),
+  body("password").isLength({ min: 6 }),
+  body("confirm").custom((v, { req }) => v === req.body.password),
   async (req, res) => {
     const errors = validationResult(req);
-    const { token } = req.params;
-
     if (!errors.isEmpty()) {
-      return res.status(400).render("reset", { token, error: errors.array()[0].msg });
+      return res.status(400).render("reset", { token: req.params.token, error: errors.array()[0].msg });
     }
-    const row = await resetByToken(token);
+    const row = await resetByToken(req.params.token);
     if (!row || dayjs().isAfter(dayjs(row.expires_at)) || row.used) {
       return res.status(400).send("Invalid or expired reset link.");
     }
@@ -267,83 +259,88 @@ app.post(
   }
 );
 
-// -------- Dashboard + Grid --------
-// הצגה: עמודת שעה מימין + 4 משבצות משמאל (הקיבוץ לפי time_label נעשה ב-EJS)
+// -------- Dashboard + Admin --------
+// הדשבורד הרגיל
 app.get("/dashboard", requireAuth, async (req, res) => {
   const slots = await getSlotsWithReservations();
   res.render("dashboard", { slots });
 });
+// עמוד אדמין – אותה תצוגה בדיוק (ה־view מזהה role=admin ומציג כפתורי ניהול)
+app.get("/admin", requireAuth, requireRole("admin"), async (req, res) => {
+  const slots = await getSlotsWithReservations();
+  res.render("dashboard", { slots });
+});
 
-// משתמש: הרשמה/ביטול (משבצת אחת למשתמש)
+// משתמש: הרשמה/ביטול
 app.post("/reserve/:slotId", requireAuth, async (req, res) => {
   try {
     await reserveSlot(req.session.user.id, Number(req.params.slotId));
+    await broadcastSlots();
     return res.json({ ok: true });
   } catch (e) {
     return res.status(400).send(e?.message || "המשבצת תפוסה או לא פעילה.");
   }
 });
-
 app.post("/unreserve", requireAuth, async (req, res) => {
   await clearUserReservation(req.session.user.id);
+  await broadcastSlots();
   return res.json({ ok: true });
 });
 
-// אדמין: ניקוי, פתיחה/סגירה, כתיבת שם ידני
+// אדמין: ניקוי / פתיחה-סגירה / עריכת שם
 app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
   await clearSlotReservation(Number(req.params.slotId));
+  await broadcastSlots();
   return res.json({ ok: true });
 });
-
 app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async (req, res) => {
-  const active = !!req.body.active;
-  await setSlotActive(Number(req.params.slotId), active);
+  await setSlotActive(Number(req.params.slotId), !!req.body.active);
+  await broadcastSlots();
   return res.json({ ok: true });
 });
-
-// כתיבת label ידנית (אם ריק – מחזיר לצבע ניטרלי)
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
   await updateSlot(slotId, { label, color: label ? "#86efac" : "#e5e7eb" });
+  await broadcastSlots();
   return res.json({ ok: true });
 });
 
-// (אופציונלי) אדמין: עדכון/יצירה/מחיקה גנריים
+// (אופציונלי) פעולות גנריות
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const { slot_id, label, color, time_label } = req.body;
   await updateSlot(Number(slot_id), { label, color, time_label });
+  await broadcastSlots();
   return res.redirect("/dashboard");
 });
-
 app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
   const { label, color, time_label, col_index, row_index, active } = req.body;
   await createSlot({
     label: label ?? "",
     color: color ?? "#e5e7eb",
     time_label,
-    col_index: Number(col_index),   // 1..4 בלבד (אין תאי שעה ב־DB)
-    row_index: Number(row_index),   // שורת השעה
+    col_index: Number(col_index), // 1..4 בלבד
+    row_index: Number(row_index),
     is_time: false,
     active: active !== "false",
   });
+  await broadcastSlots();
   return res.redirect("/dashboard");
 });
-
 app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, res) => {
-  const { slot_id } = req.body;
-  await deleteSlot(Number(slot_id));
+  await deleteSlot(Number(req.body.slot_id));
+  await broadcastSlots();
   return res.redirect("/dashboard");
 });
 
 // -------- Logout --------
-app.get("/logout", (req, res) => {
+app.post("/logout", (req, res) => {
   req.session.destroy(() => {
     res.clearCookie("connect.sid");
     res.redirect("/login");
   });
 });
-app.post("/logout", (req, res) => {
+app.get("/logout", (req, res) => {
   req.session.destroy(() => {
     res.clearCookie("connect.sid");
     res.redirect("/login");
@@ -354,6 +351,6 @@ app.post("/logout", (req, res) => {
 app.use((req, res) => res.status(404).send("Not Found"));
 
 // Start
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
