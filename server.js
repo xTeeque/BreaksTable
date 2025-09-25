@@ -14,6 +14,7 @@ import { nanoid } from "nanoid";
 import rateLimit from "express-rate-limit";
 import httpPkg from "http";
 import { Server as SocketIOServer } from "socket.io";
+import cron from "node-cron";
 
 import {
   pool,
@@ -330,6 +331,20 @@ app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, r
   await broadcastSlots();
   return res.redirect("/dashboard");
 });
+
+// אדמין: ניקוי כללי (מסיר כל ההרשמות ומאפס תוויות/צבעים)
+app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM reservations`);
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`); // תכלת כברירת מחדל
+    await broadcastSlots();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: "Failed to clear all" });
+  }
+});
+
 
 // -------- Logout --------
 app.post("/logout", (req, res) => {
