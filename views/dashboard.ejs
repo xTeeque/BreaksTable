@@ -53,7 +53,7 @@
              const taken = !!s.user_id;
              const mine  = s.user_id && user && s.user_id === user.id;
              const showName = taken || (user && user.role==='admin' && s.label);
-             const bg = taken ? '#86efac' : '#e5e7eb'; // ניטרלי תמיד, ירוק רק כשנתפס
+             const bg = taken ? '#86efac' : '#e0f2fe';
              const disabledForUser = (!s.active || (taken && !mine));
         %>
           <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
