@@ -1,5 +1,11 @@
 // scripts/init-db.js
-import db from "../src/db.js";
+import {
+  pool,
+  userByEmail,
+  insertUser,
+  seedSlotsIfEmpty,
+  normalizeSlotsToFour, // חשוב: אם הוספנו פונקציה זו ב-db.js
+} from "../src/db.js";
 import bcrypt from "bcryptjs";
 
 const email = (process.env.ADMIN_EMAIL || "admin@example.com").toLowerCase();
@@ -8,17 +14,15 @@ const firstName = process.env.ADMIN_FIRST_NAME || "Admin";
 const lastName  = process.env.ADMIN_LAST_NAME || "User";
 
 async function ensureAdmin() {
-  const existing = await db.userByEmail(email);
+  const existing = await userByEmail(email);
   if (!existing) {
     const hash = await bcrypt.hash(password, 12);
-    const id = await db.insertUser(email, hash, "admin", new Date().toISOString(), firstName, lastName);
+    const id = await insertUser(email, hash, "admin", new Date().toISOString(), firstName, lastName);
     console.log("Created admin user:", email, "id:", id);
     return;
   }
-
-  // קיים? ודא שהתפקיד הוא admin
   if (existing.role !== "admin") {
-    await db.pool.query(`UPDATE users SET role='admin' WHERE id=$1`, [existing.id]);
+    await pool.query(`UPDATE users SET role='admin' WHERE id=$1`, [existing.id]);
     console.log("Upgraded existing user to admin:", email);
   } else {
     console.log("Admin already exists:", email);
@@ -27,8 +31,13 @@ async function ensureAdmin() {
 
 await ensureAdmin();
 
-// שמירת/מיגרציית טבלאות + סידינג משבצות (אם ריק) — נשאר כמו אצלך
-await db.seedSlotsIfEmpty();
-console.log("Slots seeded (if empty).");
+// זרע ברירות מחדל אם הטבלה ריקה
+await seedSlotsIfEmpty();
 
+// יישור נתונים: ודא שתמיד יש 4 משבצות לכל שעה (2 פתוחות, 2 סגורות)
+if (typeof normalizeSlotsToFour === "function") {
+  await normalizeSlotsToFour();
+}
+
+console.log("Init DB done.");
 process.exit(0);
