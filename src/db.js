@@ -22,7 +22,7 @@ async function migrateSlotsSchema() {
   `);
 
   // עמודות ותיקוני ברירת מחדל
-  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS active  BOOLEAN NOT NULL DEFAULT TRUE;`);
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;`);
   await pool.query(`ALTER TABLE slots ALTER COLUMN label SET DEFAULT '';`);
   await pool.query(`ALTER TABLE slots ALTER COLUMN color SET DEFAULT '#e5e7eb';`);
   await pool.query(`UPDATE slots SET label = COALESCE(label,'');`);
@@ -116,14 +116,25 @@ export async function markResetUsed(id) {
 export async function getSlotsWithReservations() {
   const { rows } = await pool.query(`
     SELECT
-      s.id AS slot_id, s.label, s.color, s.time_label, s.col_index, s.row_index, s.active,
+      s.id AS slot_id,
+      s.label,
+      s.color,
+      s.time_label,
+      s.col_index,
+      s.row_index,
+      s.active,
       r.user_id,
-      u.first_name, u.last_name
+      u.first_name,
+      u.last_name
     FROM slots s
     LEFT JOIN reservations r ON r.slot_id = s.id
     LEFT JOIN users u ON u.id = r.user_id
-    ORDER BY s.time_label ASC, s.row_index ASC, s.col_index ASC;
-  ``);
+    ORDER BY
+      -- מיון כרונולוגי לפי HH:mm
+      (split_part(s.time_label, ':', 1)::int * 60 + split_part(s.time_label, ':', 2)::int) ASC,
+      s.row_index ASC,
+      s.col_index ASC
+  `);
   return rows;
 }
 
