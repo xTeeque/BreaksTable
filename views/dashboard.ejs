@@ -16,47 +16,67 @@
       </form>
     </div>
     <p class="muted">
-      אפשר להירשם למשבצת אחת בלבד. לחיצה על משבצת פנויה תרשום אותך; לחיצה על המשבצת שלך תסיר אותך.
-      (אדמין יכול לפתוח/לסגור/לנקות וגם לערוך שם)
+      כל שורה = שעה מימין + 4 משבצות משמאל. ניתן להירשם למשבצת אחת. (אדמין: פתיחה/סגירה/ניקוי/עריכת שם)
     </p>
 
-    <!-- כדי להבטיח שהעמודה של השעה תישב מימין גם בעמוד RTL -->
     <div id="grid" class="grid">
-      <% 
+
+      <%
         // קיבוץ לפי שעה
         const grouped = {};
         slots.forEach(s => {
-          if (!grouped[s.time_label]) grouped[s.time_label] = [];
-          grouped[s.time_label].push(s);
+          const key = s.time_label;
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(s);
         });
-    
-        const hours = Object.keys(grouped).sort(); // מיון שעות
+
+        // מיון שעות כרונולוגי (HH:mm)
+        const hours = Object.keys(grouped).sort((a,b)=>{
+          const [ah,am]=a.split(':').map(Number); const [bh,bm]=b.split(':').map(Number);
+          return (ah*60+am)-(bh*60+bm);
+        });
       %>
-    
-      <% hours.forEach(time => { %>
-        <!-- שורה של שעה אחת -->
+
+      <% hours.forEach(time => { 
+           // ממיינים את המשבצות של אותה שעה לפי col_index ומרפדים ל-4
+           const cellsSorted = grouped[time]
+             .slice()
+             .sort((a,b)=>(a.col_index||0)-(b.col_index||0));
+           const padded = [1,2,3,4].map(ci => cellsSorted.find(x => x.col_index === ci) || {
+             slot_id: null, label: "", color: "#e5e7eb", time_label: time, col_index: ci, row_index: 0,
+             active: false, user_id: null, first_name: null, last_name: null
+           });
+      %>
+        <!-- תא שעה (מימין) -->
         <div class="cell time"><%= time %></div>
-        <% grouped[time].forEach(s => { 
+
+        <!-- 4 משבצות משמאל -->
+        <% padded.forEach(s => {
+             const isPlaceholder = !s.slot_id;         // אין תא במסד – מציגים פלייסהולדר נעול
              const taken = !!s.user_id;
              const mine = s.user_id && user && s.user_id === user.id;
-             const showName = taken || (user && user.role === 'admin' && s.label);
+             const showName = taken || (user && user.role==='admin' && s.label);
              const bg = taken ? '#86efac' : (s.color || '#e5e7eb');
-             const disabledForUser = (!s.active || (taken && !mine));
+             const disabledForUser = isPlaceholder || (!s.active || (taken && !mine));
         %>
           <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
                style="background:<%= bg %>"
-               data-slot-id="<%= s.slot_id %>"
-               data-taken="<%= taken ? '1' : '0' %>"
-               data-mine="<%= mine ? '1' : '0' %>"
-               data-active="<%= s.active ? '1' : '0' %>">
+               <% if (!isPlaceholder) { %>
+                 data-slot-id="<%= s.slot_id %>"
+                 data-taken="<%= taken ? '1' : '0' %>"
+                 data-mine="<%= mine ? '1' : '0' %>"
+                 data-active="<%= s.active ? '1' : '0' %>"
+               <% } %>>
             <div class="slot-text"><%= showName ? (s.label || '') : '' %></div>
             <div class="badge">
-              <% if (mine) { %>שלך (הסר)
+              <% if (isPlaceholder) { %>לא זמין
+              <% } else if (mine) { %>שלך (הסר)
               <% } else if (!s.active) { %>סגור
               <% } else if (taken) { %>תפוס
               <% } else { %>פנוי<% } %>
             </div>
-            <% if (user && user.role === 'admin') { %>
+
+            <% if (!isPlaceholder && user && user.role==='admin') { %>
               <div class="admin-actions">
                 <span class="badge" data-action="clear">נקה</span>
                 <% if (s.active) { %>
@@ -70,8 +90,8 @@
           </div>
         <% }) %>
       <% }) %>
-    </div>
 
+    </div>
   </div>
 
   <script>window.CSRF_TOKEN = "<%= csrfToken %>"</script>
