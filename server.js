@@ -360,6 +360,19 @@ app.get("/logout", (req, res) => {
   });
 });
 
+// ניקוי אוטומטי כל יום ב-19:00 (Asia/Jerusalem)
+cron.schedule("0 19 * * *", async () => {
+  try {
+    await pool.query(`DELETE FROM reservations`);
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`);
+    await broadcastSlots();
+    console.log("Daily clear-all executed (15:00 Asia/Jerusalem)");
+  } catch (e) {
+    console.error("Daily clear-all failed:", e);
+  }
+}, { timezone: "Asia/Jerusalem" });
+
+
 // 404
 app.use((req, res) => res.status(404).send("Not Found"));
 
