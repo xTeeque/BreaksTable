@@ -23,20 +23,20 @@
     <!-- כדי להבטיח שהעמודה של השעה תישב מימין גם בעמוד RTL -->
     <div id="grid" class="grid">
       <% 
+        // קיבוץ לפי שעה
         const grouped = {};
         slots.forEach(s => {
           if (!grouped[s.time_label]) grouped[s.time_label] = [];
-          if (!s.is_time) grouped[s.time_label].push(s);
+          grouped[s.time_label].push(s);
         });
-        const hours = Object.keys(grouped);
+    
+        const hours = Object.keys(grouped).sort(); // מיון שעות
       %>
     
       <% hours.forEach(time => { %>
-        <!-- תא השעה מימין -->
+        <!-- שורה של שעה אחת -->
         <div class="cell time"><%= time %></div>
-    
-        <!-- 4 משבצות עבור השעה -->
-        <% grouped[time].forEach(s => {
+        <% grouped[time].forEach(s => { 
              const taken = !!s.user_id;
              const mine = s.user_id && user && s.user_id === user.id;
              const showName = taken || (user && user.role === 'admin' && s.label);
@@ -71,6 +71,7 @@
         <% }) %>
       <% }) %>
     </div>
+
   </div>
 
   <script>window.CSRF_TOKEN = "<%= csrfToken %>"</script>
