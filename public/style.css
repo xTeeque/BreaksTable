@@ -1,8 +1,20 @@
-
+/* Base */
+html, body { height: 100%; }
 body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #f8fafc; }
+
+/* Center page cards like login/register */
+.page-center {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Card & typography */
 .card { max-width: 520px; margin: 5rem auto; background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1); }
 h1 { margin: 0 0 1rem 0; font-size: 1.6rem; }
 form { display: grid; gap: .75rem; }
+
 input[type="email"], input[type="password"], input[type="text"] { padding: .6rem .75rem; border: 1px solid #e5e7eb; border-radius: .5rem; }
 button { padding: .6rem .75rem; border: 0; border-radius: .5rem; background: #111827; color: white; cursor: pointer; }
 .muted { color: #6b7280; font-size: .9rem; }
@@ -10,6 +22,8 @@ button { padding: .6rem .75rem; border: 0; border-radius: .5rem; background: #11
 .info { color: #065f46; background: #d1fae5; padding: .5rem .75rem; border-radius: .5rem; }
 a { color: #1d4ed8; text-decoration: none; }
 .row { display:flex; justify-content: space-between; align-items: center; }
+
+/* Grid: שעה מימין + 4 משבצות משמאל */
 .grid{
   display:grid;
   grid-template-columns:120px repeat(4,1fr); /* שעה + 4 משבצות */
@@ -18,22 +32,49 @@ a { color: #1d4ed8; text-decoration: none; }
 }
 
 .cell{
-  padding:12px 10px;border-radius:10px;text-align:center;color:#111;
-  user-select:none;font-weight:600;cursor:pointer;background:#e5e7eb;
+  padding:12px 10px;
+  border-radius:10px;
+  text-align:center;
+  color:#111;
+  user-select:none;
+  font-weight:600;
+  cursor:pointer;
+  background:#e5e7eb; /* ניטרלי */
   transition:box-shadow .12s ease, transform .08s ease;
 }
-.cell:hover:not(.time){box-shadow:0 2px 8px rgba(0,0,0,.12);transform:translateY(-1px);}
-.cell.time{cursor:default;font-weight:700;display:flex;align-items:center;justify-content:center;background:#f3f4f6;}
-.cell.disabled{opacity:.6;cursor:not-allowed;}
-body[data-role="admin"] .cell.disabled{cursor:pointer;opacity:.85;}
-body[data-role="admin"] .cell.disabled:hover{box-shadow:0 2px 8px rgba(0,0,0,.12);transform:translateY(-1px);}
-.cell.mine{outline:3px solid #16a34a;}
-.badge{display:inline-block;margin-top:6px;padding:2px 8px;font-size:12px;border-radius:999px;background:rgba(0,0,0,.12);}
-.admin-actions{margin-top:6px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;}
-.badge.success{background:#16a34a;color:#fff;} .badge.danger{background:#b91c1c;color:#fff;} .badge.info{background:#0ea5e9;color:#fff;}
-.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+.cell:hover:not(.time){ box-shadow:0 2px 8px rgba(0,0,0,.12); transform:translateY(-1px); }
+.cell.time{
+  cursor:default;
+  font-weight:700;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#f3f4f6;
+}
+.cell.disabled{ opacity:.6; cursor:not-allowed; }
 
-/* --- Forms --- */
+/* לאדמין – גם כשסגור/תפוס אין 'not-allowed' */
+body[data-role="admin"] .cell.disabled{ cursor:pointer; opacity:.85; }
+body[data-role="admin"] .cell.disabled:hover{ box-shadow:0 2px 8px rgba(0,0,0,.12); transform:translateY(-1px); }
+
+.cell.mine{ outline:3px solid #16a34a; }
+
+.badge{
+  display:inline-block;
+  margin-top:6px;
+  padding:2px 8px;
+  font-size:12px;
+  border-radius:999px;
+  background:rgba(0,0,0,.12);
+}
+.admin-actions{ margin-top:6px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
+.badge.success{ background:#16a34a; color:#fff; }
+.badge.danger{  background:#b91c1c; color:#fff; }
+.badge.info{    background:#0ea5e9; color:#fff; }
+
+.topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+
+/* --- Forms (רוחב שדות זהה לכפתור, ממורכז בכרטיס) --- */
 .card form input[type="email"],
 .card form input[type="password"],
 .card form input[type="text"] {
@@ -47,6 +88,7 @@ body[data-role="admin"] .cell.disabled:hover{box-shadow:0 2px 8px rgba(0,0,0,.12
   border: 1px solid #d1d5db;
   border-radius: 8px;
   box-sizing: border-box;
+  justify-self: center; /* ממורכז בתוך ה-grid של הטופס */
 }
 
 .card form button {
@@ -61,6 +103,5 @@ body[data-role="admin"] .cell.disabled:hover{box-shadow:0 2px 8px rgba(0,0,0,.12
   background: #111827;
   color: #fff;
   cursor: pointer;
+  justify-self: center; /* ממורכז בתוך ה-grid של הטופס */
 }
-
-
