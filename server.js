@@ -332,16 +332,15 @@ app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, r
   return res.redirect("/dashboard");
 });
 
-// אדמין: ניקוי כללי (מסיר כל ההרשמות ומאפס תוויות/צבעים)
 app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
   try {
     await pool.query(`DELETE FROM reservations`);
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`); // תכלת כברירת מחדל
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`); // צבע ברירת המחדל החדש
     await broadcastSlots();
-    return res.json({ ok: true });
+    res.json({ ok: true });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ ok: false, error: "Failed to clear all" });
+    res.status(500).json({ ok: false, error: "Failed to clear all" });
   }
 });
 
