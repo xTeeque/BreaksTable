@@ -12,9 +12,9 @@ a { color: #1d4ed8; text-decoration: none; }
 .row { display:flex; justify-content: space-between; align-items: center; }
 .grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr); /* 4 משבצות + עמודת שעה (עמודה 5) */
+  grid-template-columns: 120px repeat(4, 1fr);
   gap: 6px;
-  direction: ltr; /* מבטיח שהעמודה החמישית תופיע מימין */
+  direction: rtl; /* כדי שהעמודה הראשונה (שעה) תופיע בצד ימין */
 }
 
 .cell {
@@ -32,8 +32,9 @@ a { color: #1d4ed8; text-decoration: none; }
 .cell:hover:not(.time) { box-shadow: 0 2px 8px rgba(0,0,0,.12); transform: translateY(-1px); }
 
 .cell.time {
-  cursor: default;
+  background: #f3f4f6;
   font-weight: 700;
+  cursor: default;
 }
 
 .cell.disabled {
