@@ -1,24 +1,22 @@
-
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>הגדרת סיסמה חדשה</title>
+  <title>קביעת סיסמה חדשה</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div class="card">
-    <h1>הגדרת סיסמה חדשה</h1>
-    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <h1>סיסמה חדשה</h1>
+    <% if (error) { %><p class="error"><%= error %></p><% } %>
     <form method="post" action="/reset/<%= token %>">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <label>סיסמה חדשה</label>
-      <input type="password" name="password" required minlength="6">
-      <label>אימות סיסמה</label>
-      <input type="password" name="confirm" required minlength="6">
-      <button type="submit">שמור סיסמה</button>
+      <div><label>סיסמה</label><br><input name="password" type="password" required minlength="6"></div>
+      <div><label>אישור סיסמה</label><br><input name="confirm" type="password" required minlength="6"></div>
+      <button type="submit">עדכן סיסמה</button>
     </form>
+    <p><a href="/login">חזרה להתחברות</a></p>
   </div>
 </body>
 </html>
