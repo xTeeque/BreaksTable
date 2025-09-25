@@ -21,25 +21,34 @@
     </p>
 
     <!-- כדי להבטיח שהעמודה של השעה תישב מימין גם בעמוד RTL -->
-    <div id="grid" class="grid" dir="ltr">
-      <% slots.forEach(s => { 
-           const taken = !!s.user_id;
-           const mine = s.user_id && user && s.user_id === user.id;
-           const isTime = !!s.is_time;
-           const showName = taken || (user && user.role === 'admin' && s.label); // אדמין רואה שם אם כתב ידנית
-           const bg = taken ? '#86efac' : (s.color || '#e5e7eb'); // ירוק כשנתפס
-           const disabledForUser = (!isTime && (!s.active || (taken && !mine)));
+    <div id="grid" class="grid">
+      <% 
+        const grouped = {};
+        slots.forEach(s => {
+          if (!grouped[s.time_label]) grouped[s.time_label] = [];
+          if (!s.is_time) grouped[s.time_label].push(s);
+        });
+        const hours = Object.keys(grouped);
       %>
-        <div class="cell <%= isTime ? 'time' : '' %> <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
-             style="background:<%= bg %>"
-             data-slot-id="<%= s.slot_id %>"
-             data-is-time="<%= isTime ? '1' : '0' %>"
-             data-taken="<%= taken ? '1' : '0' %>"
-             data-mine="<%= mine ? '1' : '0' %>"
-             data-active="<%= s.active ? '1' : '0' %>">
-          <% if (isTime) { %>
-            <div class="time-text"><%= s.time_label %></div>
-          <% } else { %>
+    
+      <% hours.forEach(time => { %>
+        <!-- תא השעה מימין -->
+        <div class="cell time"><%= time %></div>
+    
+        <!-- 4 משבצות עבור השעה -->
+        <% grouped[time].forEach(s => {
+             const taken = !!s.user_id;
+             const mine = s.user_id && user && s.user_id === user.id;
+             const showName = taken || (user && user.role === 'admin' && s.label);
+             const bg = taken ? '#86efac' : (s.color || '#e5e7eb');
+             const disabledForUser = (!s.active || (taken && !mine));
+        %>
+          <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
+               style="background:<%= bg %>"
+               data-slot-id="<%= s.slot_id %>"
+               data-taken="<%= taken ? '1' : '0' %>"
+               data-mine="<%= mine ? '1' : '0' %>"
+               data-active="<%= s.active ? '1' : '0' %>">
             <div class="slot-text"><%= showName ? (s.label || '') : '' %></div>
             <div class="badge">
               <% if (mine) { %>שלך (הסר)
@@ -47,7 +56,6 @@
               <% } else if (taken) { %>תפוס
               <% } else { %>פנוי<% } %>
             </div>
-
             <% if (user && user.role === 'admin') { %>
               <div class="admin-actions">
                 <span class="badge" data-action="clear">נקה</span>
@@ -59,8 +67,8 @@
                 <span class="badge info" data-action="label">ערוך שם</span>
               </div>
             <% } %>
-          <% } %>
-        </div>
+          </div>
+        <% }) %>
       <% }) %>
     </div>
   </div>
