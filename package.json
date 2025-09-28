@@ -1,25 +1,29 @@
 {
   "name": "login-auth-starter-prod",
   "version": "1.4.0",
-  "private": true,
+  "description": "Authentication starter with Express, Postgres, Sessions, and Dashboard",
+  "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
-    "init:db": "node scripts/init-db.js",
-    "postinstall": "npm run init:db"
+    "dev": "nodemon server.js",
+    "init:db": "node scripts/init-db.js"
   },
   "dependencies": {
-  "bcryptjs": "^2.4.3",
-  "connect-flash": "^0.1.1",
-  "connect-pg-simple": "^9.0.0",
-  "csurf": "^1.11.0",
-  "dotenv": "^16.3.1",
-  "ejs": "^3.1.9",
-  "express": "^4.18.2",
-  "express-session": "^1.17.3",
-  "nodemailer": "^6.9.11",
-  "pg": "^8.11.3",
-  "socket.io": "^4.7.2"
+    "bcryptjs": "^2.4.3",
+    "connect-flash": "^0.1.1",
+    "connect-pg-simple": "^9.0.0",
+    "csurf": "^1.11.0",
+    "dotenv": "^16.3.1",
+    "ejs": "^3.1.9",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "morgan": "^1.10.0",
+    "nodemailer": "^6.9.11",
+    "pg": "^8.11.3",
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   }
 }
