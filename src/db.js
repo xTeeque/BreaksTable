@@ -181,7 +181,7 @@ export async function reserveSlot(userId, slotId) {
   try {
     await client.query("BEGIN");
 
-    // ננעל את המשבצת לעדכון (קיימת ופעילה)
+    // נעל את המשבצת לעדכון
     const slotRes = await client.query(
       `SELECT id, active FROM slots WHERE id=$1 FOR UPDATE`,
       [slotId]
@@ -189,23 +189,23 @@ export async function reserveSlot(userId, slotId) {
     if (!slotRes.rowCount) throw new Error("Slot not found");
     if (!slotRes.rows[0].active) throw new Error("Slot is not active");
 
-    // אם מישהו כבר תפס (ברמת DB) – נחסום
+    // אם כבר תפוס — עצור
     const takenRes = await client.query(
       `SELECT id FROM reservations WHERE slot_id=$1 FOR UPDATE`,
       [slotId]
     );
     if (takenRes.rowCount) throw new Error("Slot already reserved");
 
-    // הסר רישום קודם של המשתמש (משבצת אחת למשתמש)
+    // מחק הרשמה קודמת של המשתמש (משבצת אחת למשתמש)
     await client.query(`DELETE FROM reservations WHERE user_id=$1`, [userId]);
 
-    // רישום חדש
+    // צור הרשמה חדשה
     await client.query(
       `INSERT INTO reservations (slot_id, user_id) VALUES ($1, $2)`,
       [slotId, userId]
     );
 
-    // עדכון LABEL + צבע ירוק
+    // עדכן LABEL + צבע
     const u = await client.query(
       `SELECT first_name, last_name FROM users WHERE id=$1`,
       [userId]
@@ -219,6 +219,10 @@ export async function reserveSlot(userId, slotId) {
     await client.query("COMMIT");
   } catch (e) {
     try { await client.query("ROLLBACK"); } catch {}
+    // אם נפל על ייחודיות (23505) נחזיר הודעה ברורה
+    if (e && e.code === "23505") {
+      throw new Error("Slot already reserved");
+    }
     throw e;
   } finally {
     client.release();
