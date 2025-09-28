@@ -10,6 +10,7 @@ import csrf from "csurf";
 import flash from "connect-flash";
 import { Server } from "socket.io";
 import http from "http";
+import bcrypt from "bcryptjs"; // ✅ ייבוא תקין של bcryptjs (default)
 
 import {
   pool,
@@ -31,7 +32,8 @@ import {
   renameHour,
   deleteHour,
   adminOverrideLabel,
-  ensureReservationConstraints
+  ensureReservationConstraints,
+  initDb, // אם אתה מזניק טבלאות גם ב־server (אופציונלי)
 } from "./src/db.js";
 
 const app = express();
@@ -40,7 +42,7 @@ const io = new Server(server);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ========== Middlewares ==========
+// ===== Middlewares =====
 app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.urlencoded({ extended: true }));
@@ -51,7 +53,7 @@ const PgSession = connectPgSimple(session);
 app.use(
   session({
     store: new PgSession({ pool }),
-    secret: process.env.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET || "change_me",
     resave: false,
     saveUninitialized: false,
     cookie: { maxAge: 1000 * 60 * 60 }
@@ -64,7 +66,7 @@ app.use(flash());
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
-// ========== Helpers ==========
+// ===== Helpers =====
 function requireAuth(req, res, next) {
   if (!req.session.user) return res.redirect("/login");
   next();
@@ -78,13 +80,12 @@ function requireRole(role) {
   };
 }
 
-// Socket.IO broadcaster
 async function broadcastSlots() {
   const slots = await getSlotsWithReservations();
-  io.emit("slots:update", slots);
+  io.emit("slots:update", { slots });
 }
 
-// ========== Routes ==========
+// ===== Routes =====
 app.get("/", (req, res) => res.redirect("/login"));
 
 app.get("/login", (req, res) => {
@@ -98,13 +99,18 @@ app.post("/login", async (req, res) => {
     req.flash("error", "משתמש לא נמצא");
     return res.redirect("/login");
   }
-  const bcrypt = await import("bcryptjs");
-  const ok = await bcrypt.compare(password, user.password);
+  const ok = await bcrypt.compare(password, user.password); // ✅ עכשיו יעבוד
   if (!ok) {
     req.flash("error", "סיסמה שגויה");
     return res.redirect("/login");
   }
-  req.session.user = { id: user.id, email: user.email, role: user.role, first_name: user.first_name, last_name: user.last_name };
+  req.session.user = {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    first_name: user.first_name,
+    last_name: user.last_name,
+  };
   res.redirect("/dashboard");
 });
 
@@ -129,21 +135,17 @@ app.post("/register", async (req, res) => {
 
 app.get("/dashboard", requireAuth, async (req, res) => {
   const slots = await getSlotsWithReservations();
-  res.render("dashboard", {
-    user: req.session.user,
-    slots,
-    csrfToken: req.csrfToken()
-  });
+  res.render("dashboard", { user: req.session.user, slots, csrfToken: req.csrfToken() });
 });
 
-// ========== Reservations ==========
+// Reservations
 app.post("/reserve/:id", requireAuth, async (req, res) => {
   try {
-    await reserveSlot(req.session.user.id, req.params.id);
+    await reserveSlot(req.session.user.id, Number(req.params.id));
     await broadcastSlots();
     res.json({ ok: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message || "failed" });
   }
 });
 
@@ -153,61 +155,59 @@ app.post("/unreserve", requireAuth, async (req, res) => {
     await broadcastSlots();
     res.json({ ok: true });
   } catch (e) {
-    res.status(400).json({ error: e.message });
+    res.status(400).json({ error: e.message || "failed" });
   }
 });
 
-// ========== Admin ==========
+// Admin
 app.post("/admin/slots/:id/clear", requireAuth, requireRole("admin"), async (req, res) => {
-  await clearSlotReservation(req.params.id);
+  await clearSlotReservation(Number(req.params.id));
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 app.post("/admin/slots/:id/active", requireAuth, requireRole("admin"), async (req, res) => {
-  await setSlotActive(req.params.id, req.body.active);
+  await setSlotActive(Number(req.params.id), !!req.body.active);
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 app.post("/admin/slots/:id/label", requireAuth, requireRole("admin"), async (req, res) => {
-  await adminOverrideLabel(req.params.id, req.body.label);
+  await adminOverrideLabel(Number(req.params.id), (req.body.label || "").toString().trim());
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
   await pool.query(`DELETE FROM reservations`);
   await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`);
   await broadcastSlots();
   res.json({ ok: true });
 });
-
-// שעות
 app.post("/admin/hours/add", requireAuth, requireRole("admin"), async (req, res) => {
-  await addHour(req.body.time_label);
+  await addHour((req.body.time_label || "").toString().trim());
   await broadcastSlots();
   res.json({ ok: true });
 });
 app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, res) => {
-  await renameHour(req.body.old_time_label, req.body.new_time_label);
+  await renameHour((req.body.old_time_label || "").toString().trim(), (req.body.new_time_label || "").toString().trim());
   await broadcastSlots();
   res.json({ ok: true });
 });
 app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, res) => {
-  await deleteHour(req.body.time_label);
+  await deleteHour((req.body.time_label || "").toString().trim());
   await broadcastSlots();
   res.json({ ok: true });
 });
 
-// ========== Socket.IO ==========
-io.on("connection", (socket) => {
-  console.log("Client connected");
-});
+// Socket.IO
+io.on("connection", () => { /* no-op */ });
 
-// ========== Start ==========
+// Start
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, async () => {
   console.log("Server running on http://localhost:" + PORT);
-  await ensureReservationConstraints();
+  try {
+    await initDb(); // אופציונלי – בונה טבלאות אם לא קיימות + מיגרציות רכות
+    await ensureReservationConstraints();
+  } catch (e) {
+    console.error("Startup DB init failed:", e);
+  }
 });
