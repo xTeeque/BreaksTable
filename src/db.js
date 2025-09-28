@@ -77,6 +77,33 @@ export async function ensureReservationConstraints() {
     WHERE r.id = x.id AND x.rn > 1;
   `);
 
+  // הוספת שעה חדשה
+export async function addHour(timeLabel) {
+  // מוצאים את המיקום הבא לשעה החדשה
+  const res = await pool.query(`SELECT COALESCE(MAX(position), 0) + 1 AS pos FROM slots`);
+  const nextPos = res.rows[0].pos;
+
+  // יוצרים 4 משבצות לשעה הזו
+  for (let i = 1; i <= 4; i++) {
+    const active = i <= 2; // 2 פתוחות, 2 סגורות
+    await pool.query(
+      `INSERT INTO slots (time_label, position, active) VALUES ($1,$2,$3)`,
+      [timeLabel, i, active]
+    );
+  }
+}
+
+// שינוי שעה
+export async function renameHour(oldTime, newTime) {
+  await pool.query(`UPDATE slots SET time_label=$1 WHERE time_label=$2`, [newTime, oldTime]);
+}
+
+// מחיקת שעה
+export async function deleteHour(timeLabel) {
+  await pool.query(`DELETE FROM slots WHERE time_label=$1`, [timeLabel]);
+}
+
+
   // יצירת אינדקסים ייחודיים אם לא קיימים
   await pool.query(`
     DO $$
