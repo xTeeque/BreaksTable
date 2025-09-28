@@ -26,15 +26,20 @@ a { color: #1d4ed8; text-decoration: none; }
 /* Grid: שעה מימין + 4 משבצות משמאל */
 .grid{
   display:grid;
-  grid-template-columns:120px repeat(4,1fr); /* שעה + 4 משבצות */
+  grid-template-columns:120px repeat(4,1fr);
   gap:6px;
-  direction:rtl; /* כך התא הראשון בשורה (השעה) יוצג מימין */
+  direction:rtl;
 }
 
 .cell{
-  padding:12px 10px;border-radius:10px;text-align:center;color:#111;
-  user-select:none;font-weight:600;cursor:pointer;
-  background:#e0f2fe; /* ← תכלת עדין (במקום #e5e7eb) */
+  padding:12px 10px;
+  border-radius:10px;
+  text-align:center;
+  color:#111;
+  user-select:none;
+  font-weight:600;
+  cursor:pointer;
+  background:#e0f2fe; /* תכלת חי כברירת מחדל */
   transition:box-shadow .12s ease, transform .08s ease;
 }
 .cell:hover:not(.time){ box-shadow:0 2px 8px rgba(0,0,0,.12); transform:translateY(-1px); }
@@ -69,6 +74,17 @@ body[data-role="admin"] .cell.disabled:hover{ box-shadow:0 2px 8px rgba(0,0,0,.1
 
 .topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
 
+/* Buttons */
+.btn {
+  padding: .5rem .8rem;
+  border: 0;
+  border-radius: .5rem;
+  background: #111827;
+  color: #fff;
+  cursor: pointer;
+}
+.btn.danger { background:#b91c1c; }
+
 /* --- Forms (רוחב שדות זהה לכפתור, ממורכז בכרטיס) --- */
 .card form input[type="email"],
 .card form input[type="password"],
@@ -83,7 +99,7 @@ body[data-role="admin"] .cell.disabled:hover{ box-shadow:0 2px 8px rgba(0,0,0,.1
   border: 1px solid #d1d5db;
   border-radius: 8px;
   box-sizing: border-box;
-  justify-self: center; /* ממורכז בתוך ה-grid של הטופס */
+  justify-self: center;
 }
 
 .card form button {
@@ -98,5 +114,5 @@ body[data-role="admin"] .cell.disabled:hover{ box-shadow:0 2px 8px rgba(0,0,0,.1
   background: #111827;
   color: #fff;
   cursor: pointer;
-  justify-self: center; /* ממורכז בתוך ה-grid של הטופס */
+  justify-self: center;
 }
