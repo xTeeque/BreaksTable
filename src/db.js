@@ -289,6 +289,51 @@ export async function deleteHour(time_label) {
   await pool.query(`DELETE FROM slots WHERE time_label=$1`, [time_label]);
 }
 
+// src/db.js — הוסף איפשהו בקובץ
+export async function ensureReservationConstraints() {
+  // מחיקת כפילויות לפי משתמש: השאר את ההרשמה החדשה ביותר
+  await pool.query(`
+    WITH ranked AS (
+      SELECT id, user_id,
+             ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
+      FROM reservations
+    )
+    DELETE FROM reservations r
+    USING ranked x
+    WHERE r.id = x.id AND x.rn > 1;
+  `);
+
+  // מחיקת כפילויות לפי משבצת: השאר את ההרשמה החדשה ביותר
+  await pool.query(`
+    WITH ranked AS (
+      SELECT id, slot_id,
+             ROW_NUMBER() OVER (PARTITION BY slot_id ORDER BY created_at DESC) AS rn
+      FROM reservations
+    )
+    DELETE FROM reservations r
+    USING ranked x
+    WHERE r.id = x.id AND x.rn > 1;
+  `);
+
+  // אינדקסים ייחודיים שימנעו כפילויות להבא (נוצרים רק אם לא קיימים)
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='uniq_reservations_user'
+      ) THEN
+        CREATE UNIQUE INDEX uniq_reservations_user ON reservations(user_id);
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='uniq_reservations_slot'
+      ) THEN
+        CREATE UNIQUE INDEX uniq_reservations_slot ON reservations(slot_id);
+      END IF;
+    END$$;
+  `);
+}
+
+
 // --- Admin override label: clears reservation; sets label; optional lock ---
 export async function adminOverrideLabel(slotId, label, lock = true) {
   await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
