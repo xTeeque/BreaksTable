@@ -177,23 +177,54 @@ export async function clearSlotReservation(slotId) {
 }
 
 export async function reserveSlot(userId, slotId) {
-  await clearUserReservation(userId);
-  const { rows: srows } = await pool.query(
-    `SELECT id, active FROM slots WHERE id=$1`,
-    [slotId]
-  );
-  const slot = srows[0];
-  if (!slot || !slot.active) throw new Error("Slot is not active");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
-  await pool.query(`INSERT INTO reservations (slot_id, user_id) VALUES ($1, $2)`, [slotId, userId]);
+    // ננעל את המשבצת לעדכון (קיימת ופעילה)
+    const slotRes = await client.query(
+      `SELECT id, active FROM slots WHERE id=$1 FOR UPDATE`,
+      [slotId]
+    );
+    if (!slotRes.rowCount) throw new Error("Slot not found");
+    if (!slotRes.rows[0].active) throw new Error("Slot is not active");
 
-  const { rows: urows } = await pool.query(
-    `SELECT first_name, last_name FROM users WHERE id=$1`,
-    [userId]
-  );
-  const fullName = `${urows[0]?.first_name || ""} ${urows[0]?.last_name || ""}`.trim();
-  await pool.query(`UPDATE slots SET label=$1, color='#86efac' WHERE id=$2`, [fullName, slotId]);
+    // אם מישהו כבר תפס (ברמת DB) – נחסום
+    const takenRes = await client.query(
+      `SELECT id FROM reservations WHERE slot_id=$1 FOR UPDATE`,
+      [slotId]
+    );
+    if (takenRes.rowCount) throw new Error("Slot already reserved");
+
+    // הסר רישום קודם של המשתמש (משבצת אחת למשתמש)
+    await client.query(`DELETE FROM reservations WHERE user_id=$1`, [userId]);
+
+    // רישום חדש
+    await client.query(
+      `INSERT INTO reservations (slot_id, user_id) VALUES ($1, $2)`,
+      [slotId, userId]
+    );
+
+    // עדכון LABEL + צבע ירוק
+    const u = await client.query(
+      `SELECT first_name, last_name FROM users WHERE id=$1`,
+      [userId]
+    );
+    const fullName = `${u.rows[0]?.first_name || ""} ${u.rows[0]?.last_name || ""}`.trim();
+    await client.query(
+      `UPDATE slots SET label=$1, color='#86efac' WHERE id=$2`,
+      [fullName, slotId]
+    );
+
+    await client.query("COMMIT");
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
+
 
 export async function setSlotActive(slotId, active) {
   await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [!!active, slotId]);
