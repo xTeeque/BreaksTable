@@ -4,7 +4,6 @@ import {
   userByEmail,
   insertUser,
   seedSlotsIfEmpty,
-  normalizeSlotsToFour,
 } from "../src/db.js";
 import bcrypt from "bcryptjs";
 
@@ -31,6 +30,5 @@ async function ensureAdmin() {
 
 await ensureAdmin();
 await seedSlotsIfEmpty();
-await normalizeSlotsToFour(); // מבטיח 4 משבצות לשעה (2 פתוחות, 2 סגורות)
 console.log("Init DB done.");
 process.exit(0);
