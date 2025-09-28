@@ -1,6 +1,6 @@
 // public/dashboard.js
 
-// --- Utils ---
+// ================= Utils =================
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -18,7 +18,12 @@ async function postJSON(url, body) {
   try { return await res.json(); } catch { return {}; }
 }
 
-// --- Global admin buttons ---
+// מניעת דאבל-קליק / ספאם פעולות
+let actionBusy = false;
+function lockActions() { actionBusy = true; document.body.style.pointerEvents = "none"; }
+function unlockActions() { actionBusy = false; document.body.style.pointerEvents = ""; }
+
+// ================= Global admin buttons =================
 document.addEventListener("click", async (e) => {
   const t = e.target;
 
@@ -28,10 +33,13 @@ document.addEventListener("click", async (e) => {
     e.preventDefault();
     if (!confirm("לבצע ניקוי כללי של כל המשבצות?")) return;
     try {
+      lockActions();
       await postJSON("/admin/clear-all", {});
-      location.reload(); // גם Socket.IO משדר; זה גיבוי מיידי
+      location.reload(); // Socket.IO גם ישדר; זה גיבוי מיידי
     } catch (err) {
       alert("נכשל ניקוי כללי: " + (err.message || err));
+    } finally {
+      unlockActions();
     }
     return;
   }
@@ -42,10 +50,13 @@ document.addEventListener("click", async (e) => {
     const time = prompt("הזן שעה בפורמט HH:mm (למשל 15:30):", "");
     if (!time) return;
     try {
+      lockActions();
       await postJSON("/admin/hours/add", { time_label: time.trim() });
       location.reload();
     } catch (err) {
       alert("נכשל הוספת שעה: " + (err.message || err));
+    } finally {
+      unlockActions();
     }
     return;
   }
@@ -57,10 +68,13 @@ document.addEventListener("click", async (e) => {
     const newTime = prompt(`שנה שעה ${oldTime} ל- (HH:mm):`, oldTime);
     if (!newTime || newTime === oldTime) return;
     try {
+      lockActions();
       await postJSON("/admin/hours/rename", { old_time_label: oldTime, new_time_label: newTime.trim() });
       location.reload();
     } catch (err) {
       alert("נכשל שינוי שעה: " + (err.message || err));
+    } finally {
+      unlockActions();
     }
     return;
   }
@@ -71,16 +85,19 @@ document.addEventListener("click", async (e) => {
     const time = delBtn.dataset.time;
     if (!confirm(`למחוק את השעה ${time} (ימחק גם את המשבצות שלה)?`)) return;
     try {
+      lockActions();
       await postJSON("/admin/hours/delete", { time_label: time });
       location.reload();
     } catch (err) {
       alert("נכשל מחיקת שעה: " + (err.message || err));
+    } finally {
+      unlockActions();
     }
     return;
   }
 });
 
-// --- Per-slot actions (admin + user) ---
+// ================= Per-slot actions (admin + user) =================
 document.addEventListener("click", async (e) => {
   const cell = e.target.closest("[data-slot-id]");
   if (!cell) return;
@@ -91,45 +108,80 @@ document.addEventListener("click", async (e) => {
   const taken = cell.dataset.taken === "1";
   const active = cell.dataset.active === "1";
 
-  // פעולות אדמין על תא
+  // ---- Admin actions on a single cell ----
   if (isAdmin && e.target.closest("[data-action='clear']")) {
-    try { await postJSON(`/admin/slots/${slotId}/clear`, {}); location.reload(); }
-    catch (err) { alert(err.message); }
-    return;
-  }
-  if (isAdmin && e.target.closest("[data-action='open']")) {
-    try { await postJSON(`/admin/slots/${slotId}/active`, { active: true }); location.reload(); }
-    catch (err) { alert(err.message); }
-    return;
-  }
-  if (isAdmin && e.target.closest("[data-action='close']")) {
-    try { await postJSON(`/admin/slots/${slotId}/active`, { active: false }); location.reload(); }
-    catch (err) { alert(err.message); }
-    return;
-  }
-  if (isAdmin && e.target.closest("[data-action='label']")) {
-    const name = prompt("שם שיוצג למשבצת: (ננקה רישום קיים וננעל את המשבצת)", "");
-    if (name === null) return;
     try {
-      await postJSON(`/admin/slots/${slotId}/label`, { label: name.trim(), lock: true });
+      lockActions();
+      await postJSON(`/admin/slots/${slotId}/clear`, {});
       location.reload();
     } catch (err) {
       alert(err.message);
+    } finally {
+      unlockActions();
     }
     return;
   }
 
-  // פעולות משתמש רגיל: הרשמה / ביטול
+  if (isAdmin && e.target.closest("[data-action='open']")) {
+    try {
+      lockActions();
+      await postJSON(`/admin/slots/${slotId}/active`, { active: true });
+      location.reload();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      unlockActions();
+    }
+    return;
+  }
+
+  if (isAdmin && e.target.closest("[data-action='close']")) {
+    try {
+      lockActions();
+      await postJSON(`/admin/slots/${slotId}/active`, { active: false });
+      location.reload();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      unlockActions();
+    }
+    return;
+  }
+
+  if (isAdmin && e.target.closest("[data-action='label']")) {
+    const name = prompt("שם שיוצג למשבצת: (ננקה רישום קיים וננעל את המשבצת)", "");
+    if (name === null) return;
+    try {
+      lockActions();
+      await postJSON(`/admin/slots/${slotId}/label`, { label: name.trim(), lock: true });
+      location.reload();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      unlockActions();
+    }
+    return;
+  }
+
+  // ---- User actions (reserve / unreserve) ----
   try {
-    if (!active) return;                 // סגור
+    if (actionBusy) return;  // מניעת דאבל-קליק
+    if (!active) return;     // תא סגור
+
+    lockActions();
+
     if (!mine && !taken) {
+      // ניסיון תפיסה
       await postJSON(`/reserve/${slotId}`, {});
     } else if (mine) {
+      // ביטול
       await postJSON(`/unreserve`, {});
     } else {
-      return; // תפוס אצל אחר
+      // תפוס אצל אחר
+      return;
     }
-    // השרת ישדר slots:update; רענון מיידי כדי לצמצם דיליי
+
+    // השרת משדר slots:update ב-Socket.IO, אבל נרענן גם מיד כדי לצמצם דיליי
     location.reload();
   } catch (err) {
     const msg = (err.message || "").toLowerCase();
@@ -140,10 +192,12 @@ document.addEventListener("click", async (e) => {
     } else {
       alert(err.message || "Action failed");
     }
+  } finally {
+    unlockActions();
   }
 });
 
-// --- Socket.IO live updates (failsafe if not loaded) ---
+// ================= Socket.IO live updates (failsafe) =================
 (function initRealtime(){
   try {
     if (typeof io === "undefined") return;
