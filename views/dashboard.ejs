@@ -23,23 +23,26 @@
     </div>
 
     <p class="muted">
-      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות. משבצת תפוסה נצבעת בירוק.
+      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות. משבצת תפוסה או כזו שהאדמין כתב בה שם — נצבעת בירוק.
     </p>
 
     <div id="grid" class="grid">
       <%
         // קיבוץ לפי שעה
         const grouped = {};
-        slots.forEach(s => {
+        (slots || []).forEach(s => {
           const k = s.time_label;
           if (!grouped[k]) grouped[k] = [];
           grouped[k].push(s);
         });
-        // מיון שעות כרונולוגי
-        const hours = Object.keys(grouped).sort((a,b)=>{
-          const [ah,am]=a.split(':').map(Number); const [bh,bm]=b.split(':').map(Number);
-          return (ah*60+am)-(bh*60+bm);
-        });
+
+        // מיון שעות כרונולוגי HH:mm
+        const hours = Object.keys(grouped)
+          .filter(Boolean)
+          .sort((a,b)=>{
+            const [ah,am]=a.split(':').map(Number); const [bh,bm]=b.split(':').map(Number);
+            return (ah*60+am)-(bh*60+bm);
+          });
       %>
 
       <% hours.forEach(time => {
@@ -63,8 +66,14 @@
         <% cells.forEach(s => {
              const taken = !!s.user_id;
              const mine  = s.user_id && user && s.user_id === user.id;
-             const showName = taken || (user && user.role==='admin' && s.label);
-             const bg = taken ? '#86efac' : '#e0f2fe';
+
+             // מציגים שם תמיד אם יש label (כולל “שם שאדמין כתב”), גם בלי reservation
+             const showName = !!(s.label && s.label.trim());
+
+             // ירוק אם תפוס או אם לאדמין יש label; אחרת תכלת
+             const bg = (taken || showName) ? '#86efac' : '#e0f2fe';
+
+             // משתמש רגיל לא יכול ללחוץ על סגור/תפוס; אדמין כן
              const disabledForUser = (!s.active || (taken && !mine));
         %>
           <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
@@ -77,7 +86,7 @@
             <div class="badge">
               <% if (mine) { %>שלך (הסר)
               <% } else if (!s.active) { %>סגור
-              <% } else if (taken) { %>תפוס
+              <% } else if (taken || showName) { %>תפוס
               <% } else { %>פנוי<% } %>
             </div>
 
