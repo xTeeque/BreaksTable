@@ -1,20 +1,15 @@
 // server.js
 import express from "express";
 import session from "express-session";
-import pgSimpleFactory from "connect-pg-simple";
-import helmet from "helmet";
+import connectPgSimple from "connect-pg-simple";
 import morgan from "morgan";
+import helmet from "helmet";
 import path from "path";
 import { fileURLToPath } from "url";
 import csrf from "csurf";
-import { body, validationResult } from "express-validator";
-import bcrypt from "bcryptjs";
-import dayjs from "dayjs";
-import { nanoid } from "nanoid";
-import rateLimit from "express-rate-limit";
-import httpPkg from "http";
-import { Server as SocketIOServer } from "socket.io";
-import cron from "node-cron";
+import flash from "connect-flash";
+import { Server } from "socket.io";
+import http from "http";
 
 import {
   pool,
@@ -32,348 +27,187 @@ import {
   updateSlot,
   createSlot,
   deleteSlot,
-  // NEW for admin features:
   addHour,
   renameHour,
   deleteHour,
   adminOverrideLabel,
+  ensureReservationConstraints
 } from "./src/db.js";
 
-import { requireAuth, requireRole } from "./src/middleware/auth.js";
-import { sendPasswordReset, sendWelcome } from "./src/mailer.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 const app = express();
-const server = httpPkg.createServer(app);
-const io = new SocketIOServer(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
-});
+const server = http.createServer(app);
+const io = new Server(server);
 
-const PORT = process.env.PORT || 3000;
-const NODE_ENV = process.env.NODE_ENV || "development";
-const SESSION_SECRET = process.env.SESSION_SECRET || "dev_secret_change_me";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Views / static
-app.set("view engine", "ejs");
-app.set("views", path.join(__dirname, "views"));
+// ========== Middlewares ==========
+app.use(helmet());
+app.use(morgan("dev"));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Security / parsing / logs
-app.set("trust proxy", 1);
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.urlencoded({ extended: false }));
-app.use(express.json());
-app.use(morgan("combined"));
+const PgSession = connectPgSimple(session);
+app.use(
+  session({
+    store: new PgSession({ pool }),
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 1000 * 60 * 60 }
+  })
+);
 
-// Sessions in Postgres
-const PgSession = pgSimpleFactory(session);
-const sessionMiddleware = session({
-  store: new PgSession({
-    pool,
-    tableName: "session",
-    createTableIfMissing: true,
-  }),
-  secret: SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: NODE_ENV === "production",
-    maxAge: 1000 * 60 * 60 * 24 * 7,
-  },
-});
-app.use(sessionMiddleware);
-io.engine.use((req, res, next) => sessionMiddleware(req, res, next));
+app.use(csrf());
+app.use(flash());
 
-// CSRF
-const csrfProtection = csrf();
-app.use(csrfProtection);
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
 
-// Locals
-app.use((req, res, next) => {
-  res.locals.csrfToken = req.csrfToken();
-  res.locals.user = req.session.user || null;
+// ========== Helpers ==========
+function requireAuth(req, res, next) {
+  if (!req.session.user) return res.redirect("/login");
   next();
-});
-
-// Rate limit for auth endpoints
-const authLimiter = rateLimit({ windowMs: 60_000, max: 20 });
-app.use(["/login", "/register", "/forgot", "/reset"], authLimiter);
-
-// Broadcast helper
-async function broadcastSlots() {
-  const slots = await getSlotsWithReservations();
-  io.emit("slots:update", { slots });
+}
+function requireRole(role) {
+  return (req, res, next) => {
+    if (!req.session.user || req.session.user.role !== role) {
+      return res.status(403).send("Forbidden");
+    }
+    next();
+  };
 }
 
-// ================== ROUTES ==================
-app.get("/", (req, res) => {
-  if (req.session.user) return res.redirect("/dashboard");
-  return res.redirect("/login");
-});
+// Socket.IO broadcaster
+async function broadcastSlots() {
+  const slots = await getSlotsWithReservations();
+  io.emit("slots:update", slots);
+}
 
-// Login
+// ========== Routes ==========
+app.get("/", (req, res) => res.redirect("/login"));
+
 app.get("/login", (req, res) => {
-  if (req.session.user) return res.redirect("/dashboard");
-  res.render("login", { error: null });
+  res.render("login", { csrfToken: req.csrfToken(), error: req.flash("error") });
 });
-app.post(
-  "/login",
-  body("email").isEmail(),
-  body("password").isLength({ min: 6 }),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).render("login", { error: errors.array()[0].msg });
-    }
-    const { email, password } = req.body;
-    const user = await userByEmail(email);
-    if (!user) return res.status(401).render("login", { error: "Invalid credentials" });
-    const ok = await bcrypt.compare(password, user.password_hash);
-    if (!ok) return res.status(401).render("login", { error: "Invalid credentials" });
 
-    req.session.regenerate((err) => {
-      if (err) return res.status(500).render("login", { error: "Server error (session)" });
-      req.session.user = {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        first_name: user.first_name || "",
-        last_name: user.last_name || "",
-      };
-      req.session.save(() => res.redirect("/dashboard"));
-    });
-  }
-);
-
-// Register
-app.get("/register", (req, res) => {
-  if (req.session.user) return res.redirect("/dashboard");
-  res.render("register", { error: null });
-});
-app.post(
-  "/register",
-  body("first_name").trim().notEmpty(),
-  body("last_name").trim().notEmpty(),
-  body("email").isEmail(),
-  body("password").isLength({ min: 6 }),
-  body("confirm").custom((val, { req }) => val === req.body.password),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).render("register", { error: errors.array()[0].msg });
-    }
-    const { first_name, last_name, email, password } = req.body;
-    const exists = await userByEmail(email);
-    if (exists) return res.status(400).render("register", { error: "Email already in use" });
-
-    const hash = await bcrypt.hash(password, 12);
-    const role = "user";
-    const id = await insertUser(
-      email,
-      hash,
-      role,
-      dayjs().toISOString(),
-      first_name.trim(),
-      last_name.trim()
-    );
-
-    req.session.regenerate((err) => {
-      if (err) return res.status(500).render("register", { error: "Server error (session)" });
-      req.session.user = {
-        id,
-        email: email.toLowerCase(),
-        role,
-        first_name: first_name.trim(),
-        last_name: last_name.trim(),
-      };
-      req.session.save(async () => {
-        try { await sendWelcome(email.toLowerCase(), first_name.trim(), last_name.trim()); } catch {}
-        return res.redirect("/dashboard");
-      });
-    });
-  }
-);
-
-// Forgot / Reset
-app.get("/forgot", (req, res) => {
-  if (req.session.user) return res.redirect("/dashboard");
-  res.render("forgot", { info: null, error: null });
-});
-app.post("/forgot", body("email").isEmail(), async (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).render("forgot", { info: null, error: errors.array()[0].msg });
-  }
-  const { email } = req.body;
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
   const user = await userByEmail(email);
-  if (user) {
-    const token = nanoid(48);
-    const expires_at = dayjs().add(1, "hour").toISOString();
-    await insertReset(user.id, token, expires_at);
-    try { await sendPasswordReset(user.email, token); } catch {}
-  }
-  return res.render("forgot", { info: "If the email exists, a reset link has been sent.", error: null });
-});
-app.get("/reset/:token", async (req, res) => {
-  const row = await resetByToken(req.params.token);
-  if (!row || dayjs().isAfter(dayjs(row.expires_at)) || row.used) {
-    return res.status(400).send("Invalid or expired reset link.");
-  }
-  res.render("reset", { token: req.params.token, error: null });
-});
-app.post(
-  "/reset/:token",
-  body("password").isLength({ min: 6 }),
-  body("confirm").custom((v, { req }) => v === req.body.password),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).render("reset", { token: req.params.token, error: errors.array()[0].msg });
-    }
-    const row = await resetByToken(req.params.token);
-    if (!row || dayjs().isAfter(dayjs(row.expires_at)) || row.used) {
-      return res.status(400).send("Invalid or expired reset link.");
-    }
-    const hash = await bcrypt.hash(req.body.password, 12);
-    await updateUserPassword(row.user_id, hash);
-    await markResetUsed(row.id);
+  if (!user) {
+    req.flash("error", "משתמש לא נמצא");
     return res.redirect("/login");
   }
-);
+  const bcrypt = await import("bcryptjs");
+  const ok = await bcrypt.compare(password, user.password);
+  if (!ok) {
+    req.flash("error", "סיסמה שגויה");
+    return res.redirect("/login");
+  }
+  req.session.user = { id: user.id, email: user.email, role: user.role, first_name: user.first_name, last_name: user.last_name };
+  res.redirect("/dashboard");
+});
 
-// Dashboard + Admin (אותה תצוגה; אדמין רואה פעולות נוספות)
+app.post("/logout", (req, res) => {
+  req.session.destroy(() => res.redirect("/login"));
+});
+
+app.get("/register", (req, res) => {
+  res.render("register", { csrfToken: req.csrfToken(), error: req.flash("error") });
+});
+
+app.post("/register", async (req, res) => {
+  const { email, password, first_name, last_name, phone } = req.body;
+  try {
+    await insertUser({ email, password, first_name, last_name, phone, role: "user" });
+    res.redirect("/login");
+  } catch (e) {
+    req.flash("error", "שגיאה בהרשמה: " + e.message);
+    res.redirect("/register");
+  }
+});
+
 app.get("/dashboard", requireAuth, async (req, res) => {
   const slots = await getSlotsWithReservations();
-  res.render("dashboard", { slots });
-});
-app.get("/admin", requireAuth, requireRole("admin"), async (req, res) => {
-  const slots = await getSlotsWithReservations();
-  res.render("dashboard", { slots });
-});
-
-// User actions
-app.post("/reserve/:slotId", requireAuth, async (req, res) => {
-  try {
-    await reserveSlot(req.session.user.id, Number(req.params.slotId));
-    await broadcastSlots();
-    return res.json({ ok: true });
-  } catch (e) {
-    return res.status(400).send(e?.message || "המשבצת תפוסה או לא פעילה.");
-  }
-});
-app.post("/unreserve", requireAuth, async (req, res) => {
-  await clearUserReservation(req.session.user.id);
-  await broadcastSlots();
-  return res.json({ ok: true });
+  res.render("dashboard", {
+    user: req.session.user,
+    slots,
+    csrfToken: req.csrfToken()
+  });
 });
 
-// Admin per-slot actions
-app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
-  await clearSlotReservation(Number(req.params.slotId));
-  await broadcastSlots();
-  return res.json({ ok: true });
-});
-app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async (req, res) => {
-  await setSlotActive(Number(req.params.slotId), !!req.body.active);
-  await broadcastSlots();
-  return res.json({ ok: true });
-});
-app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
-  const slotId = Number(req.params.slotId);
-  const label = (req.body.label ?? "").toString().trim();
-  const lock = req.body.lock !== false; // default true: lock slot
+// ========== Reservations ==========
+app.post("/reserve/:id", requireAuth, async (req, res) => {
   try {
-    await adminOverrideLabel(slotId, label, lock);
-    await broadcastSlots();
-    return res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    return res.status(400).json({ ok: false, error: e.message || "failed" });
-  }
-});
-
-// Admin hour management
-app.post("/admin/hours/add", requireAuth, requireRole("admin"), async (req, res) => {
-  const time = (req.body.time_label || "").toString().trim();
-  if (!/^\d{1,2}:\d{2}$/.test(time)) return res.status(400).json({ ok:false, error:"Invalid time format" });
-  try {
-    await addHour(time);
+    await reserveSlot(req.session.user.id, req.params.id);
     await broadcastSlots();
     res.json({ ok: true });
   } catch (e) {
-    res.status(400).json({ ok: false, error: e.message || "failed" });
+    res.status(400).json({ error: e.message });
   }
+});
+
+app.post("/unreserve", requireAuth, async (req, res) => {
+  try {
+    await clearUserReservation(req.session.user.id);
+    await broadcastSlots();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ========== Admin ==========
+app.post("/admin/slots/:id/clear", requireAuth, requireRole("admin"), async (req, res) => {
+  await clearSlotReservation(req.params.id);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
+app.post("/admin/slots/:id/active", requireAuth, requireRole("admin"), async (req, res) => {
+  await setSlotActive(req.params.id, req.body.active);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
+app.post("/admin/slots/:id/label", requireAuth, requireRole("admin"), async (req, res) => {
+  await adminOverrideLabel(req.params.id, req.body.label);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
+app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
+  await pool.query(`DELETE FROM reservations`);
+  await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
+// שעות
+app.post("/admin/hours/add", requireAuth, requireRole("admin"), async (req, res) => {
+  await addHour(req.body.time_label);
+  await broadcastSlots();
+  res.json({ ok: true });
 });
 app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, res) => {
-  const oldTime = (req.body.old_time_label || "").toString().trim();
-  const newTime = (req.body.new_time_label || "").toString().trim();
-  if (!/^\d{1,2}:\d{2}$/.test(newTime)) return res.status(400).json({ ok:false, error:"Invalid time format" });
-  try {
-    await renameHour(oldTime, newTime);
-    await broadcastSlots();
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ ok: false, error: e.message || "failed" });
-  }
+  await renameHour(req.body.old_time_label, req.body.new_time_label);
+  await broadcastSlots();
+  res.json({ ok: true });
 });
 app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, res) => {
-  const time = (req.body.time_label || "").toString().trim();
-  try {
-    await deleteHour(time);
-    await broadcastSlots();
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ ok: false, error: e.message || "failed" });
-  }
+  await deleteHour(req.body.time_label);
+  await broadcastSlots();
+  res.json({ ok: true });
 });
 
-// Admin: clear-all
-app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
-  try {
-    await pool.query(`DELETE FROM reservations`);
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`);
-    await broadcastSlots();
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: "Failed to clear all" });
-  }
+// ========== Socket.IO ==========
+io.on("connection", (socket) => {
+  console.log("Client connected");
 });
 
-// Logout
-app.post("/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.clearCookie("connect.sid");
-    res.redirect("/login");
-  });
-});
-app.get("/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.clearCookie("connect.sid");
-    res.redirect("/login");
-  });
-});
-
-// 404
-app.use((req, res) => res.status(404).send("Not Found"));
-
-// Daily auto-clear 15:00 Asia/Jerusalem
-cron.schedule("0 15 * * *", async () => {
-  try {
-    await pool.query(`DELETE FROM reservations`);
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe'`);
-    await broadcastSlots();
-    console.log("Daily clear-all executed (15:00 Asia/Jerusalem)");
-  } catch (e) {
-    console.error("Daily clear-all failed:", e);
-  }
-}, { timezone: "Asia/Jerusalem" });
-
-// Start
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// ========== Start ==========
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, async () => {
+  console.log("Server running on http://localhost:" + PORT);
+  await ensureReservationConstraints();
 });
