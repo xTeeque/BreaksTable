@@ -9,8 +9,9 @@ export const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ==================== INIT DB ====================
+// ==================== INIT & MIGRATIONS ====================
 export async function initDb() {
+  // בסיסי – טבלאות אם לא קיימות
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -25,7 +26,6 @@ export async function initDb() {
     CREATE TABLE IF NOT EXISTS slots (
       id SERIAL PRIMARY KEY,
       time_label VARCHAR(20) NOT NULL,
-      position INT NOT NULL,
       label VARCHAR(255) DEFAULT '',
       color VARCHAR(20) DEFAULT '#e0f2fe',
       active BOOLEAN DEFAULT true
@@ -45,6 +45,23 @@ export async function initDb() {
       used BOOLEAN DEFAULT false,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+
+  // מיגרציות רכות – מבטיחות עמודות לשתי הסכימות
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS position INT;`);
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS col_index INT;`);
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS row_index INT;`);
+
+  // אינדקס ייחודי (שעה + עמודה) לתאימות (אל תכשיל אם כבר קיים)
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='uniq_slots_time_col'
+      ) THEN
+        CREATE UNIQUE INDEX uniq_slots_time_col ON slots (time_label, COALESCE(col_index, position));
+      END IF;
+    END$$;
   `);
 }
 
@@ -88,25 +105,42 @@ export async function markResetUsed(token) {
 // ==================== SLOTS ====================
 export async function getSlotsWithReservations() {
   const res = await pool.query(`
-    SELECT s.*, r.user_id, u.first_name, u.last_name
+    SELECT
+      s.id AS slot_id,
+      s.time_label,
+      s.label,
+      s.color,
+      s.active,
+      s.col_index,
+      s.row_index,
+      s.position,
+      r.user_id,
+      u.first_name,
+      u.last_name
     FROM slots s
-    LEFT JOIN reservations r ON s.id=r.slot_id
-    LEFT JOIN users u ON r.user_id=u.id
-    ORDER BY s.time_label, s.position
+    LEFT JOIN reservations r ON r.slot_id = s.id
+    LEFT JOIN users u ON u.id = r.user_id
+    ORDER BY
+      (split_part(s.time_label, ':', 1)::int * 60 + split_part(s.time_label, ':', 2)::int) ASC,
+      COALESCE(s.col_index, s.position) ASC
   `);
   return res.rows;
 }
 
-export async function createSlot({ time_label, position, active = true }) {
+export async function createSlot({ time_label, col_index = null, row_index = null, position = null, active = true }) {
+  // נכתוב גם col_index וגם position לתאימות
+  const col = col_index ?? position ?? 1;
+  const pos = position ?? col_index ?? 1;
   const res = await pool.query(
-    `INSERT INTO slots (time_label, position, active)
-     VALUES ($1,$2,$3) RETURNING *`,
-    [time_label, position, active]
+    `INSERT INTO slots (time_label, col_index, row_index, position, active)
+     VALUES ($1,$2,$3,$4,$5)
+     RETURNING *`,
+    [time_label, col, row_index, pos, active]
   );
   return res.rows[0];
 }
 
-export async function updateSlot(id, { label, color, active }) {
+export async function updateSlot(id, { label = "", color = "#e0f2fe", active = true }) {
   await pool.query(
     `UPDATE slots SET label=$1, color=$2, active=$3 WHERE id=$4`,
     [label, color, active, id]
@@ -117,7 +151,7 @@ export async function deleteSlot(id) {
   await pool.query(`DELETE FROM slots WHERE id=$1`, [id]);
 }
 
-// ==================== RESERVATIONS ====================
+// ==================== RESERVATIONS (atomic) ====================
 export async function reserveSlot(userId, slotId) {
   const client = await pool.connect();
   try {
@@ -166,8 +200,7 @@ export async function reserveSlot(userId, slotId) {
 export async function clearUserReservation(userId) {
   const res = await pool.query(`DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`, [userId]);
   if (res.rowCount) {
-    const slotId = res.rows[0].slot_id;
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [slotId]);
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [res.rows[0].slot_id]);
   }
 }
 
@@ -178,10 +211,11 @@ export async function clearSlotReservation(slotId) {
 
 // ==================== ADMIN ====================
 export async function setSlotActive(slotId, active) {
-  await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [active, slotId]);
+  await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [!!active, slotId]);
 }
 
 export async function adminOverrideLabel(slotId, label) {
+  // מסיר רישום קיים כדי לשחרר את המשתמש, ומשאיר המשבצת נעולה עם לייבל אדום
   await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
   await pool.query(
     `UPDATE slots SET label=$1, color='#f87171' WHERE id=$2`,
@@ -189,12 +223,13 @@ export async function adminOverrideLabel(slotId, label) {
   );
 }
 
-// הוספת שעה (4 משבצות)
 export async function addHour(timeLabel) {
+  // 4 משבצות: 2 פתוחות (1–2), 2 סגורות (3–4)
   for (let i = 1; i <= 4; i++) {
-    const active = i <= 2; // 2 פתוחות, 2 סגורות כברירת מחדל
+    const active = i <= 2;
     await pool.query(
-      `INSERT INTO slots (time_label, position, active) VALUES ($1,$2,$3)`,
+      `INSERT INTO slots (time_label, col_index, position, active)
+       VALUES ($1,$2,$2,$3)`,
       [timeLabel, i, active]
     );
   }
@@ -205,11 +240,13 @@ export async function renameHour(oldTime, newTime) {
 }
 
 export async function deleteHour(timeLabel) {
+  await pool.query(`DELETE FROM reservations WHERE slot_id IN (SELECT id FROM slots WHERE time_label=$1)`, [timeLabel]);
   await pool.query(`DELETE FROM slots WHERE time_label=$1`, [timeLabel]);
 }
 
 // ==================== CONSTRAINTS ====================
 export async function ensureReservationConstraints() {
+  // משתמש: לכל היותר משבצת אחת
   await pool.query(`
     WITH ranked AS (
       SELECT id, user_id,
@@ -221,6 +258,7 @@ export async function ensureReservationConstraints() {
     WHERE r.id = x.id AND x.rn > 1;
   `);
 
+  // משבצת: לכל היותר משתמש אחד
   await pool.query(`
     WITH ranked AS (
       SELECT id, slot_id,
@@ -232,6 +270,7 @@ export async function ensureReservationConstraints() {
     WHERE r.id = x.id AND x.rn > 1;
   `);
 
+  // אינדקסים ייחודיים
   await pool.query(`
     DO $$
     BEGIN
