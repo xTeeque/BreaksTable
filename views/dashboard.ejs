@@ -9,44 +9,55 @@
 <body data-role="<%= user?.role || 'user' %>">
   <div class="card" style="max-width:960px">
     <div class="topbar">
-      <% if (user && user.role === 'admin') { %>
-        <button id="btn-clear-all" class="badge danger" style="margin-inline-start:8px">ניקוי כללי</button>
-      <% } %>
-
       <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
-      <form method="post" action="/logout">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <button type="submit">התנתקות</button>
-      </form>
+      <div class="actions" style="display:flex; gap:8px; align-items:center;">
+        <% if (user && user.role === 'admin') { %>
+          <button id="btn-clear-all" type="button" class="btn danger">ניקוי כללי</button>
+          <button id="btn-hour-add" type="button" class="btn">הוסף שעה</button>
+        <% } %>
+        <form method="post" action="/logout" style="margin:0">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button type="submit">התנתקות</button>
+        </form>
+      </div>
     </div>
+
     <p class="muted">
-      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות. רק משבצת תפוסה נצבעת בירוק.
-      (אדמין: פתיחה/סגירה/ניקוי/עריכת שם)
+      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות. משבצת תפוסה נצבעת בירוק.
     </p>
 
     <div id="grid" class="grid">
       <%
-        const HOURS = ["12:50","13:25","14:00","14:35"];
-
         // קיבוץ לפי שעה
-        const byHour = {};
+        const grouped = {};
         slots.forEach(s => {
-          if (!byHour[s.time_label]) byHour[s.time_label] = [];
-          byHour[s.time_label].push(s);
+          const k = s.time_label;
+          if (!grouped[k]) grouped[k] = [];
+          grouped[k].push(s);
         });
-
-        // פונקציה: מחזירה בדיוק 4 משבצות לפי col_index 1..4
-        function fourFor(time) {
-          const arr = (byHour[time] || []).slice().sort((a,b)=>(a.col_index||0)-(b.col_index||0));
-          return arr; // מובטח מה־DB שתמיד 4
-        }
+        // מיון שעות כרונולוגי
+        const hours = Object.keys(grouped).sort((a,b)=>{
+          const [ah,am]=a.split(':').map(Number); const [bh,bm]=b.split(':').map(Number);
+          return (ah*60+am)-(bh*60+bm);
+        });
       %>
 
-      <% HOURS.forEach(time => {
-           const cells = fourFor(time);
+      <% hours.forEach(time => {
+           const cells = (grouped[time] || [])
+             .filter(s => s.col_index >= 1 && s.col_index <= 4)
+             .sort((a,b) => (a.col_index||0) - (b.col_index||0))
+             .slice(0, 4);
       %>
         <!-- תא שעה מימין -->
-        <div class="cell time"><%= time %></div>
+        <div class="cell time">
+          <div><%= time %></div>
+          <% if (user && user.role==='admin') { %>
+            <div class="admin-actions" style="margin-top:6px">
+              <span class="badge info" data-action="hour-rename" data-time="<%= time %>">שנה שעה</span>
+              <span class="badge danger" data-action="hour-delete" data-time="<%= time %>">מחק שעה</span>
+            </div>
+          <% } %>
+        </div>
 
         <!-- 4 משבצות משמאל -->
         <% cells.forEach(s => {
@@ -70,7 +81,7 @@
               <% } else { %>פנוי<% } %>
             </div>
 
-            <% if (user && user.role==='admin') { %>
+            <% if (user && user.role === 'admin') { %>
               <div class="admin-actions">
                 <span class="badge" data-action="clear">נקה</span>
                 <% if (s.active) { %>
@@ -87,8 +98,8 @@
     </div>
   </div>
 
-    <script>window.CSRF_TOKEN = "<%= csrfToken %>"</script>
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="/dashboard.js" defer></script>
+  <script>window.CSRF_TOKEN = "<%= csrfToken %>"</script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/dashboard.js" defer></script>
 </body>
 </html>
