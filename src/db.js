@@ -9,6 +9,45 @@ export const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// ==================== INIT DB ====================
+export async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      password VARCHAR(255) NOT NULL,
+      first_name VARCHAR(100),
+      last_name VARCHAR(100),
+      phone VARCHAR(20),
+      role VARCHAR(20) DEFAULT 'user'
+    );
+
+    CREATE TABLE IF NOT EXISTS slots (
+      id SERIAL PRIMARY KEY,
+      time_label VARCHAR(20) NOT NULL,
+      position INT NOT NULL,
+      label VARCHAR(255) DEFAULT '',
+      color VARCHAR(20) DEFAULT '#e0f2fe',
+      active BOOLEAN DEFAULT true
+    );
+
+    CREATE TABLE IF NOT EXISTS reservations (
+      id SERIAL PRIMARY KEY,
+      slot_id INT REFERENCES slots(id) ON DELETE CASCADE,
+      user_id INT REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS resets (
+      id SERIAL PRIMARY KEY,
+      user_id INT REFERENCES users(id) ON DELETE CASCADE,
+      token VARCHAR(255) NOT NULL,
+      used BOOLEAN DEFAULT false,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+}
+
 // ==================== USERS ====================
 export async function userByEmail(email) {
   const res = await pool.query(`SELECT * FROM users WHERE email=$1`, [email]);
@@ -58,7 +97,6 @@ export async function getSlotsWithReservations() {
   return res.rows;
 }
 
-// צור משבצת בודדת
 export async function createSlot({ time_label, position, active = true }) {
   const res = await pool.query(
     `INSERT INTO slots (time_label, position, active)
@@ -68,7 +106,6 @@ export async function createSlot({ time_label, position, active = true }) {
   return res.rows[0];
 }
 
-// עדכון משבצת בודדת
 export async function updateSlot(id, { label, color, active }) {
   await pool.query(
     `UPDATE slots SET label=$1, color=$2, active=$3 WHERE id=$4`,
@@ -76,7 +113,6 @@ export async function updateSlot(id, { label, color, active }) {
   );
 }
 
-// מחיקת משבצת בודדת
 export async function deleteSlot(id) {
   await pool.query(`DELETE FROM slots WHERE id=$1`, [id]);
 }
@@ -141,12 +177,10 @@ export async function clearSlotReservation(slotId) {
 }
 
 // ==================== ADMIN ====================
-// פתיחה/סגירה של משבצת
 export async function setSlotActive(slotId, active) {
   await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [active, slotId]);
 }
 
-// אדמין משנה לייבל (מסיר משתמש קיים)
 export async function adminOverrideLabel(slotId, label) {
   await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
   await pool.query(
@@ -166,12 +200,10 @@ export async function addHour(timeLabel) {
   }
 }
 
-// שינוי שעה
 export async function renameHour(oldTime, newTime) {
   await pool.query(`UPDATE slots SET time_label=$1 WHERE time_label=$2`, [newTime, oldTime]);
 }
 
-// מחיקת שעה (כל המשבצות שלה)
 export async function deleteHour(timeLabel) {
   await pool.query(`DELETE FROM slots WHERE time_label=$1`, [timeLabel]);
 }
