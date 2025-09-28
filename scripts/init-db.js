@@ -30,5 +30,6 @@ async function ensureAdmin() {
 
 await ensureAdmin();
 await seedSlotsIfEmpty();
+await ensureReservationConstraints();
 console.log("Init DB done.");
 process.exit(0);
