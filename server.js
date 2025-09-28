@@ -94,25 +94,56 @@ app.get("/login", (req, res) => {
 
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  const user = await userByEmail(email);
-  if (!user) {
-    req.flash("error", "משתמש לא נמצא");
-    return res.redirect("/login");
+
+  try {
+    const user = await userByEmail(email);
+    if (!user) {
+      req.flash("error", "משתמש לא נמצא");
+      return res.redirect("/login");
+    }
+
+    // 1) אין סיסמה ברשומה
+    if (!user.password) {
+      req.flash("error", "יש בעיה עם החשבון – אנא אפס סיסמה או פנה למנהל.");
+      return res.redirect("/login");
+    }
+
+    // 2) האש תקין של bcrypt
+    let ok = false;
+    if (user.password.startsWith("$2a$") || user.password.startsWith("$2b$") || user.password.startsWith("$2y$")) {
+      ok = await bcrypt.compare(password, user.password);
+    } else {
+      // 3) סיסמה היסטורית נשמרה כטקסט רגיל (לא האש)
+      if (user.password === password) {
+        // נבצע מיגרציה שקטה להאש ונשמור
+        await updateUserPassword(user.id, password);
+        ok = true;
+      } else {
+        ok = false;
+      }
+    }
+
+    if (!ok) {
+      req.flash("error", "סיסמה שגויה");
+      return res.redirect("/login");
+    }
+
+    // התחברות מוצלחת
+    req.session.user = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      first_name: user.first_name,
+      last_name: user.last_name,
+    };
+    res.redirect("/dashboard");
+  } catch (err) {
+    console.error("Login error:", err);
+    req.flash("error", "שגיאה בהתחברות");
+    res.redirect("/login");
   }
-  const ok = await bcrypt.compare(password, user.password); // ✅ עכשיו יעבוד
-  if (!ok) {
-    req.flash("error", "סיסמה שגויה");
-    return res.redirect("/login");
-  }
-  req.session.user = {
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    first_name: user.first_name,
-    last_name: user.last_name,
-  };
-  res.redirect("/dashboard");
 });
+
 
 app.post("/logout", (req, res) => {
   req.session.destroy(() => res.redirect("/login"));
