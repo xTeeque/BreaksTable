@@ -3,20 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>איפוס סיסמה</title>
+  <title>שחזור סיסמה</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body class="page-center">
   <div class="card">
-    <h1>איפוס סיסמה</h1>
-    <% if (info)  { %><p class="info"><%= info %></p><% } %>
-    <% if (error) { %><p class="error"><%= error %></p><% } %>
-    <form method="post" action="/forgot">
+    <h1>שחזור סיסמה</h1>
+
+    <% if (typeof error !== 'undefined' && error) { %>
+      <p class="error"><%= error %></p>
+    <% } %>
+
+    <% if (typeof message !== 'undefined' && message) { %>
+      <p class="success"><%= message %></p>
+    <% } %>
+
+    <form method="post" action="/forgot" autocomplete="on">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <div><label>אימייל</label><br><input name="email" type="email" required></div>
+
+      <div>
+        <label>אימייל</label><br>
+        <input name="email" type="email" required>
+      </div>
+
       <button type="submit">שלח קישור איפוס</button>
     </form>
-    <p><a href="/login">חזרה להתחברות</a></p>
+
+    <p style="margin-top:10px">
+      <a href="/login">חזרה להתחברות</a>
+    </p>
   </div>
 </body>
 </html>
