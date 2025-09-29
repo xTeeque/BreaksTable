@@ -42,9 +42,13 @@ async function init() {
       password_hash TEXT NOT NULL,
       first_name TEXT,
       last_name TEXT,
-      role TEXT DEFAULT 'user'
+      role TEXT DEFAULT 'user',
+      phone TEXT
     );
   `);
+
+  /* מיגרציות "אם לא קיים" — מאפשר להריץ שוב ושוב בבטחה */
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS reset_tokens (
@@ -69,9 +73,14 @@ export async function userByEmail(email) {
 
 export async function insertUser(user) {
   await pool.query(
-    `INSERT INTO users (email, password_hash, first_name, last_name, role) VALUES ($1,$2,$3,$4,$5)`,
-    [user.email, user.password_hash, user.first_name || "", user.last_name || "", user.role || "user"]
+    `INSERT INTO users (email, password_hash, first_name, last_name, role, phone)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [user.email, user.password_hash, user.first_name || "", user.last_name || "", user.role || "user", user.phone || null]
   );
+}
+
+export async function updateUserPhone(user_id, phone) {
+  await pool.query(`UPDATE users SET phone=$1 WHERE id=$2`, [phone || null, user_id]);
 }
 
 export async function insertReset({ user_id, token, expires_at }) {
@@ -97,7 +106,7 @@ export async function markResetUsed(token) {
   await pool.query(`UPDATE reset_tokens SET used=TRUE WHERE token=$1`, [token]);
 }
 
-/* ---------------- Slots & Reservations ---------------- */
+/* ---------------- Slots & Reservations (ללא שינויי SMS) ---------------- */
 
 export async function getSlotsWithReservations() {
   const { rows } = await pool.query(`
@@ -121,7 +130,6 @@ export async function getSlotsWithReservations() {
   return rows;
 }
 
-/** אתחול ראשוני אם אין משבצות בכלל */
 export async function seedSlotsIfEmpty() {
   const { rows } = await pool.query(`SELECT COUNT(*)::int AS c FROM slots`);
   if (rows[0].c > 0) return;
@@ -140,7 +148,6 @@ export async function seedSlotsIfEmpty() {
   }
 }
 
-/** שמירה על 4 משבצות לשעה (לפי הצורך – לא חובה לזמן זה) */
 export async function normalizeSlotsToFour(timeLabel) {
   const tl = (timeLabel ?? "").toString().trim();
   if (!tl) throw new Error("normalizeSlotsToFour: timeLabel is required (non-empty)");
@@ -252,7 +259,6 @@ export async function clearSlotReservation(slotId) {
   await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false WHERE id=$1`, [slotId]);
 }
 
-/** יצירת שעה חדשה (4 משבצות) */
 export async function createHour(time_label) {
   const tl = (time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) throw new Error("createHour: time_label format HH:MM required");
@@ -272,7 +278,6 @@ export async function createHour(time_label) {
   }
 }
 
-/** שינוי זמן לשעה קיימת — רק אם היעד עוד לא קיים */
 export async function renameHour(from, to) {
   const src = (from ?? "").toString().trim();
   const dst = (to ?? "").toString().trim();
@@ -284,7 +289,6 @@ export async function renameHour(from, to) {
   await pool.query(`UPDATE slots SET time_label=$2 WHERE time_label=$1`, [src, dst]);
 }
 
-/** מחיקת שעה שלמה (כולל כל המשבצות וההרשמות שלה) */
 export async function deleteHour(time_label) {
   const tl = (time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) throw new Error("deleteHour: HH:MM required");
@@ -325,7 +329,6 @@ export async function reserveSlot(userId, slotId) {
       throw new Error("המשבצת תפוסה ע\"י אדמין");
     }
 
-    // נקה הרשמה קודמת והחזר צבע נייטרלי למשבצת הקודמת
     const { rows: prev } = await client.query(
       `DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`,
       [userId]
