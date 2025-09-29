@@ -1,119 +1,128 @@
 // src/db.js
-import pg from "pg";
-import bcrypt from "bcryptjs";
-
-const { Pool } = pg;
+import { Pool } from "pg";
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: process.env.PGSSLMODE ? { rejectUnauthorized: false } : false,
 });
 
-// ==================== INIT & MIGRATIONS ====================
-export async function initDb() {
-  // בסיסי – טבלאות אם לא קיימות
+/* ---------------- Schema init & migrations ---------------- */
+
+async function migrateSlotsSchema() {
+  // בסיס טבלת slots אם מגיעים ממבנה ישן
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS slots (
+      id SERIAL PRIMARY KEY,
+      label TEXT,
+      color TEXT,
+      time_label TEXT,
+      col_index INT,
+      row_index INT
+    );
+  `);
+
+  // עמודות ותיקוני ברירת מחדל
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;`);
+  await pool.query(`ALTER TABLE slots ALTER COLUMN label SET DEFAULT '';`);
+  await pool.query(`ALTER TABLE slots ALTER COLUMN color SET DEFAULT '#e0f2fe';`);
+  await pool.query(`UPDATE slots SET label = COALESCE(label,'');`);
+  await pool.query(`UPDATE slots SET color = COALESCE(color,'#e0f2fe');`);
+  await pool.query(`UPDATE slots SET active = COALESCE(active, TRUE);`);
+}
+
+async function init() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
-      email VARCHAR(255) UNIQUE NOT NULL,
-      password VARCHAR(255) NOT NULL,
-      first_name VARCHAR(100),
-      last_name VARCHAR(100),
-      phone VARCHAR(20),
-      role VARCHAR(20) DEFAULT 'user'
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      first_name TEXT,
+      last_name TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+  `);
 
-    CREATE TABLE IF NOT EXISTS slots (
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_resets (
       id SERIAL PRIMARY KEY,
-      time_label VARCHAR(20) NOT NULL,
-      label VARCHAR(255) DEFAULT '',
-      color VARCHAR(20) DEFAULT '#e0f2fe',
-      active BOOLEAN DEFAULT true
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+  `);
 
+  await migrateSlotsSchema();
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS reservations (
       id SERIAL PRIMARY KEY,
-      slot_id INT REFERENCES slots(id) ON DELETE CASCADE,
-      user_id INT REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      slot_id INTEGER NOT NULL UNIQUE REFERENCES slots(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-
-    CREATE TABLE IF NOT EXISTS resets (
-      id SERIAL PRIMARY KEY,
-      user_id INT REFERENCES users(id) ON DELETE CASCADE,
-      token VARCHAR(255) NOT NULL,
-      used BOOLEAN DEFAULT false,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  // מיגרציות רכות – מבטיחות עמודות לשתי הסכימות
-  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS position INT;`);
-  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS col_index INT;`);
-  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS row_index INT;`);
-
-  // אינדקס ייחודי (שעה + עמודה) לתאימות (אל תכשיל אם כבר קיים)
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='uniq_slots_time_col'
-      ) THEN
-        CREATE UNIQUE INDEX uniq_slots_time_col ON slots (time_label, COALESCE(col_index, position));
-      END IF;
-    END$$;
   `);
 }
+await init();
 
-// ==================== USERS ====================
+/* ---------------- Users & Password Reset ---------------- */
+
 export async function userByEmail(email) {
-  const res = await pool.query(`SELECT * FROM users WHERE email=$1`, [email]);
-  return res.rows[0];
-}
-
-export async function insertUser({ email, password, first_name, last_name, phone, role = "user" }) {
-  const hash = await bcrypt.hash(password, 10);
-  const res = await pool.query(
-    `INSERT INTO users (email,password,first_name,last_name,phone,role)
-     VALUES ($1,$2,$3,$4,$5,$6)
-     ON CONFLICT (email) DO NOTHING
-     RETURNING *`,
-    [email, hash, first_name, last_name, phone, role]
+  const { rows } = await pool.query(
+    `SELECT id, email, password_hash, role, first_name, last_name
+     FROM users WHERE LOWER(email)=LOWER($1) LIMIT 1`,
+    [email]
   );
-  return res.rows[0];
+  return rows[0] || null;
 }
 
-// ==================== PASSWORD RESET ====================
-export async function insertReset(userId, token) {
+export async function insertUser(email, password_hash, role, created_at, first_name = "", last_name = "") {
+  const { rows } = await pool.query(
+    `INSERT INTO users (email, password_hash, role, created_at, first_name, last_name)
+     VALUES (LOWER($1), $2, $3, $4, $5, $6) RETURNING id`,
+    [email, password_hash, role, created_at, first_name, last_name]
+  );
+  return rows[0].id;
+}
+
+export async function insertReset(user_id, token, expires_at) {
   await pool.query(
-    `INSERT INTO resets (user_id, token, used) VALUES ($1,$2,false)`,
-    [userId, token]
+    `INSERT INTO password_resets (user_id, token, expires_at, used)
+     VALUES ($1, $2, $3, FALSE)`,
+    [user_id, token, expires_at]
   );
 }
+
 export async function resetByToken(token) {
-  const res = await pool.query(`SELECT * FROM resets WHERE token=$1 AND used=false`, [token]);
-  return res.rows[0];
-}
-export async function updateUserPassword(userId, password) {
-  const hash = await bcrypt.hash(password, 10);
-  await pool.query(`UPDATE users SET password=$1 WHERE id=$2`, [hash, userId]);
-}
-export async function markResetUsed(token) {
-  await pool.query(`UPDATE resets SET used=true WHERE token=$1`, [token]);
+  const { rows } = await pool.query(
+    `SELECT * FROM password_resets WHERE token=$1 LIMIT 1`,
+    [token]
+  );
+  return rows[0] || null;
 }
 
-// ==================== SLOTS ====================
+export async function updateUserPassword(user_id, password_hash) {
+  await pool.query(`UPDATE users SET password_hash=$1 WHERE id=$2`, [password_hash, user_id]);
+}
+
+export async function markResetUsed(id) {
+  await pool.query(`UPDATE password_resets SET used=TRUE WHERE id=$1`, [id]);
+}
+
+/* ---------------- Slots & Reservations ---------------- */
+
 export async function getSlotsWithReservations() {
-  const res = await pool.query(`
+  const { rows } = await pool.query(`
     SELECT
       s.id AS slot_id,
-      s.time_label,
       s.label,
       s.color,
-      s.active,
+      s.time_label,
       s.col_index,
       s.row_index,
-      s.position,
+      s.active,
       r.user_id,
       u.first_name,
       u.last_name
@@ -121,86 +130,114 @@ export async function getSlotsWithReservations() {
     LEFT JOIN reservations r ON r.slot_id = s.id
     LEFT JOIN users u ON u.id = r.user_id
     ORDER BY
+      -- מיון כרונולוגי לפי HH:mm
       (split_part(s.time_label, ':', 1)::int * 60 + split_part(s.time_label, ':', 2)::int) ASC,
-      COALESCE(s.col_index, s.position) ASC
+      s.row_index ASC,
+      s.col_index ASC
   `);
-  return res.rows;
+  return rows;
 }
 
-export async function createSlot({ time_label, col_index = null, row_index = null, position = null, active = true }) {
-  // נכתוב גם col_index וגם position לתאימות
-  const col = col_index ?? position ?? 1;
-  const pos = position ?? col_index ?? 1;
-  const res = await pool.query(
-    `INSERT INTO slots (time_label, col_index, row_index, position, active)
-     VALUES ($1,$2,$3,$4,$5)
-     RETURNING *`,
-    [time_label, col, row_index, pos, active]
-  );
-  return res.rows[0];
-}
+/** זורע נתוני דיפולט אם הטבלה ריקה: 4 שעות * 4 משבצות (2 פתוחות, 2 סגורות) */
+export async function seedSlotsIfEmpty() {
+  const countRes = await pool.query(`SELECT COUNT(*)::int AS c FROM slots`);
+  if (countRes.rows[0].c > 0) return;
 
-export async function updateSlot(id, { label = "", color = "#e0f2fe", active = true }) {
-  await pool.query(
-    `UPDATE slots SET label=$1, color=$2, active=$3 WHERE id=$4`,
-    [label, color, active, id]
-  );
-}
-
-export async function deleteSlot(id) {
-  await pool.query(`DELETE FROM slots WHERE id=$1`, [id]);
-}
-
-// ==================== RESERVATIONS (atomic) ====================
-export async function reserveSlot(userId, slotId) {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    const slotRes = await client.query(
-      `SELECT id, active FROM slots WHERE id=$1 FOR UPDATE`,
-      [slotId]
-    );
-    if (!slotRes.rowCount) throw new Error("Slot not found");
-    if (!slotRes.rows[0].active) throw new Error("Slot is not active");
-
-    const takenRes = await client.query(
-      `SELECT id FROM reservations WHERE slot_id=$1 FOR UPDATE`,
-      [slotId]
-    );
-    if (takenRes.rowCount) throw new Error("Slot already reserved");
-
-    await client.query(`DELETE FROM reservations WHERE user_id=$1`, [userId]);
-
-    await client.query(
-      `INSERT INTO reservations (slot_id, user_id) VALUES ($1,$2)`,
-      [slotId, userId]
-    );
-
-    const u = await client.query(
-      `SELECT first_name, last_name FROM users WHERE id=$1`,
-      [userId]
-    );
-    const fullName = `${u.rows[0]?.first_name || ""} ${u.rows[0]?.last_name || ""}`.trim();
-    await client.query(
-      `UPDATE slots SET label=$1, color='#86efac' WHERE id=$2`,
-      [fullName, slotId]
-    );
-
-    await client.query("COMMIT");
-  } catch (e) {
-    try { await client.query("ROLLBACK"); } catch {}
-    if (e.code === "23505") throw new Error("Slot already reserved");
-    throw e;
-  } finally {
-    client.release();
+  const HOURS = ["12:50", "13:25", "14:00", "14:35"];
+  for (let r = 0; r < HOURS.length; r++) {
+    const time = HOURS[r];
+    for (let c = 1; c <= 4; c++) {
+      const isActive = c <= 2; // בדיוק 2 פתוחות + 2 סגורות
+      await pool.query(
+        `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
+         VALUES ('', '#e0f2fe', $1, $2, $3, $4)`,
+        [time, c, r + 1, isActive]
+      );
+    }
   }
 }
 
+/** נרמול: מבטיח שבכל שעה יש בדיוק col_index 1..4 (2 פתוחות, 2 סגורות) */
+export async function normalizeSlotsToFour() {
+  // ננקה שורות לא חוקיות
+  await pool.query(`DELETE FROM slots WHERE time_label IS NULL OR TRIM(time_label) = ''`);
+
+  const HOURS = ["12:50", "13:25", "14:00", "14:35"];
+  // מחק שעות שלא ברשימה (כדי שלא תופיע שורה נוספת למטה)
+  await pool.query(`DELETE FROM slots WHERE time_label NOT IN (${HOURS.map((_,i)=>`$${i+1}`).join(',')})`, HOURS);
+
+  // ודא שיש row_index ייחודי לכל שעה
+  for (let i = 0; i < HOURS.length; i++) {
+    const time = HOURS[i];
+    const rowIndex = i + 1;
+
+    // צור חסרות 1..4, עם 2 פתוחות
+    for (let ci = 1; ci <= 4; ci++) {
+      const { rows } = await pool.query(
+        `SELECT id FROM slots WHERE time_label=$1 AND col_index=$2 LIMIT 1`,
+        [time, ci]
+      );
+      if (rows.length === 0) {
+        const isActive = ci <= 2;
+        await pool.query(
+          `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
+           VALUES ('', '#e0f2fe', $1, $2, $3, $4)`,
+          [time, ci, rowIndex, isActive]
+        );
+      } else {
+        // יישור צבע ניטרלי למצבים לא-תפוסים
+        await pool.query(
+          `UPDATE slots SET row_index=$1, color='#e0f2fe' WHERE id=$2 AND NOT EXISTS (SELECT 1 FROM reservations WHERE slot_id=$2)`,
+          [rowIndex, rows[0].id]
+        );
+      }
+    }
+
+    // מחק עודפים (כל col_index שאינו 1..4)
+    await pool.query(
+      `DELETE FROM slots WHERE time_label=$1 AND (col_index < 1 OR col_index > 4)`,
+      [time]
+    );
+
+    // קבע אקטיביות: בדיוק 2 ראשונות פתוחות, 2 אחרונות סגורות (אם לא תפוסות)
+    await pool.query(
+      `UPDATE slots SET active = CASE WHEN col_index IN (1,2) THEN TRUE ELSE FALSE END WHERE time_label=$1`,
+      [time]
+    );
+  }
+}
+
+
+export async function setSlotActive(slotId, active) {
+  await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [!!active, slotId]);
+}
+
+export async function updateSlot(slotId, { label = "", color = "#e0f2fe", time_label }) {
+  await pool.query(
+    `UPDATE slots SET label=$1, color=$2, time_label=COALESCE($3, time_label) WHERE id=$4`,
+    [label, color, time_label || null, slotId]
+  );
+}
+
+export async function createSlot({ label = "", color = "#e0f2fe", time_label, col_index, row_index, active = true }) {
+  await pool.query(
+    `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [label, color, time_label, col_index, row_index, active]
+  );
+}
+
+export async function deleteSlot(slotId) {
+  await pool.query(`DELETE FROM slots WHERE id=$1`, [slotId]);
+}
+
 export async function clearUserReservation(userId) {
-  const res = await pool.query(`DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`, [userId]);
-  if (res.rowCount) {
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [res.rows[0].slot_id]);
+  const { rows } = await pool.query(
+    `DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`,
+    [userId]
+  );
+  if (rows.length) {
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [rows[0].slot_id]);
   }
 }
 
@@ -209,81 +246,22 @@ export async function clearSlotReservation(slotId) {
   await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [slotId]);
 }
 
-// ==================== ADMIN ====================
-export async function setSlotActive(slotId, active) {
-  await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [!!active, slotId]);
-}
+export async function reserveSlot(userId, slotId) {
+  await clearUserReservation(userId); // משבצת אחת למשתמש
 
-export async function adminOverrideLabel(slotId, label) {
-  // מסיר רישום קיים כדי לשחרר את המשתמש, ומשאיר המשבצת נעולה עם לייבל אדום
-  await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
-  await pool.query(
-    `UPDATE slots SET label=$1, color='#f87171' WHERE id=$2`,
-    [label, slotId]
+  const { rows: srows } = await pool.query(
+    `SELECT id, active FROM slots WHERE id=$1`,
+    [slotId]
   );
-}
+  const slot = srows[0];
+  if (!slot || !slot.active) throw new Error("Slot is not active");
 
-export async function addHour(timeLabel) {
-  // 4 משבצות: 2 פתוחות (1–2), 2 סגורות (3–4)
-  for (let i = 1; i <= 4; i++) {
-    const active = i <= 2;
-    await pool.query(
-      `INSERT INTO slots (time_label, col_index, position, active)
-       VALUES ($1,$2,$2,$3)`,
-      [timeLabel, i, active]
-    );
-  }
-}
+  await pool.query(`INSERT INTO reservations (slot_id, user_id) VALUES ($1, $2)`, [slotId, userId]);
 
-export async function renameHour(oldTime, newTime) {
-  await pool.query(`UPDATE slots SET time_label=$1 WHERE time_label=$2`, [newTime, oldTime]);
-}
-
-export async function deleteHour(timeLabel) {
-  await pool.query(`DELETE FROM reservations WHERE slot_id IN (SELECT id FROM slots WHERE time_label=$1)`, [timeLabel]);
-  await pool.query(`DELETE FROM slots WHERE time_label=$1`, [timeLabel]);
-}
-
-// ==================== CONSTRAINTS ====================
-export async function ensureReservationConstraints() {
-  // משתמש: לכל היותר משבצת אחת
-  await pool.query(`
-    WITH ranked AS (
-      SELECT id, user_id,
-             ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC) AS rn
-      FROM reservations
-    )
-    DELETE FROM reservations r
-    USING ranked x
-    WHERE r.id = x.id AND x.rn > 1;
-  `);
-
-  // משבצת: לכל היותר משתמש אחד
-  await pool.query(`
-    WITH ranked AS (
-      SELECT id, slot_id,
-             ROW_NUMBER() OVER (PARTITION BY slot_id ORDER BY created_at DESC) AS rn
-      FROM reservations
-    )
-    DELETE FROM reservations r
-    USING ranked x
-    WHERE r.id = x.id AND x.rn > 1;
-  `);
-
-  // אינדקסים ייחודיים
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='uniq_reservations_user'
-      ) THEN
-        CREATE UNIQUE INDEX uniq_reservations_user ON reservations(user_id);
-      END IF;
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='uniq_reservations_slot'
-      ) THEN
-        CREATE UNIQUE INDEX uniq_reservations_slot ON reservations(slot_id);
-      END IF;
-    END$$;
-  `);
+  const { rows: urows } = await pool.query(
+    `SELECT first_name, last_name FROM users WHERE id=$1`,
+    [userId]
+  );
+  const fullName = `${urows[0]?.first_name || ""} ${urows[0]?.last_name || ""}`.trim();
+  await pool.query(`UPDATE slots SET label=$1, color='#86efac' WHERE id=$2`, [fullName, slotId]);
 }
