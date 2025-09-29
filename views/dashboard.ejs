@@ -11,6 +11,16 @@
     <div class="topbar">
       <% if (user && user.role === 'admin') { %>
         <button id="btn-clear-all" class="badge danger" style="margin-inline-start:8px">ניקוי כללי</button>
+        <form id="add-slot-form" class="inline" method="post" action="/admin/slots/create" style="display:inline-flex; gap:6px; align-items:center; margin-inline-start:8px">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <input name="label" placeholder="טקסט בתא (לא חובה)" style="width:140px">
+          <input name="time_label" placeholder="שעה (HH:MM)" required pattern="^\\d{2}:\\d{2}$" style="width:110px">
+          <input name="col_index" placeholder="עמודה (1-4)" type="number" min="1" max="4" required style="width:90px">
+          <input name="row_index" placeholder="שורה" type="number" min="0" required style="width:80px">
+          <input type="hidden" name="color" value="#e5e7eb">
+          <input type="hidden" name="active" value="true">
+          <button class="badge" type="submit">הוסף משבצת</button>
+        </form>
       <% } %>
 
       <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
@@ -21,7 +31,7 @@
     </div>
     <p class="muted">
       כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות. רק משבצת תפוסה נצבעת בירוק.
-      (אדמין: פתיחה/סגירה/ניקוי/עריכת שם)
+      (אדמין: פתיחה/סגירה/ניקוי/עריכת שם/עריכת שעה/מחיקה)
     </p>
 
     <div id="grid" class="grid">
@@ -35,10 +45,23 @@
           byHour[s.time_label].push(s);
         });
 
-        // פונקציה: מחזירה בדיוק 4 משבצות לפי col_index 1..4
-        function fourFor(time) {
-          const arr = (byHour[time] || []).slice().sort((a,b)=>(a.col_index||0)-(b.col_index||0));
-          return arr; // מובטח מה־DB שתמיד 4
+        function fourFor(t) {
+          const arr = (byHour[t] || []).slice().sort((a,b) => {
+            if (a.row_index !== b.row_index) return a.row_index - b.row_index;
+            return a.col_index - b.col_index;
+          });
+          // אם אין בדיוק 4, נשלים/נחתוך ויזואלית (הנתונים עצמם נשמרים בבסיס)
+          while (arr.length < 4) arr.push({
+            slot_id: -1,
+            label: '',
+            color: '#e0f2fe',
+            time_label: t,
+            col_index: arr.length+1,
+            row_index: 0,
+            active: false,
+            user_id: null
+          });
+          return arr.slice(0,4);
         }
       %>
 
@@ -79,6 +102,11 @@
                   <span class="badge success" data-action="open">פתח</span>
                 <% } %>
                 <span class="badge info" data-action="label">ערוך שם</span>
+                <span class="badge" data-action="time">ערוך שעה</span>
+                <form class="inline" data-action="delete" style="display:inline">
+                  <input type="hidden" name="slot_id" value="<%= s.slot_id %>">
+                  <button class="badge danger" type="submit">מחק</button>
+                </form>
               </div>
             <% } %>
           </div>
