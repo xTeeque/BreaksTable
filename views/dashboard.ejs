@@ -61,12 +61,11 @@
 
       <div id="grid" class="grid">
         <% HOURS.forEach(time => { const cells = fourFor(time); %>
-          <!-- תא שעה (כולל כפתורי עריכה/הסרה) -->
+          <!-- תא שעה: זמן + כפתורי עריכה/הסרה ממורכזים -->
           <div class="cell time" data-time="<%= time %>">
             <span class="time-text"><%= time %></span>
             <% if (U.role === 'admin') { %>
-              <div style="display:flex; gap:6px; align-items:center">
-                <!-- כפתור ערוך שעה — זהה ל"הסר שעה" מבחינת צורה/מחלקות -->
+              <div class="time-actions">
                 <button class="badge danger" type="button" data-action="rename-hour" data-time="<%= time %>">ערוך שעה</button>
                 <button class="badge danger" type="button" data-action="delete-hour" data-time="<%= time %>">הסר שעה</button>
               </div>
