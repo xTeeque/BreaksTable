@@ -39,7 +39,8 @@ import {
 import {
   requireAuth,
   requireRole,
-  csrfErrorHandler,
+  // הסרנו csrfErrorHandler כי אינו קיים ב-export
+  // csrfErrorHandler,
   nullableTrim,
   safeLower,
   safeString,
@@ -69,9 +70,7 @@ async function broadcastSlots() {
 }
 
 // בסיס מדיניות אבטחה
-app.use(helmet({
-  contentSecurityPolicy: false,
-}));
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(morgan("dev"));
@@ -95,13 +94,14 @@ app.use(session({
     maxAge: 1000 * 60 * 60 * 24 * 14, // 14 יום
   },
 }));
+
+// CSRF
 const csrfProtection = csrf();
+// הפעלה גלובלית כך ש-req.csrfToken() זמין בכל route שמרנדר תבנית
+app.use(csrfProtection);
 
 // שיעורי בקשה
-const limiter = rateLimit({
-  windowMs: 60_000,
-  max: 300,
-});
+const limiter = rateLimit({ windowMs: 60_000, max: 300 });
 app.use(limiter);
 
 // תצוגות
@@ -123,10 +123,10 @@ app.get("/login", (req, res) => {
   res.render("login", { csrfToken: req.csrfToken() });
 });
 
-app.post("/login",
+app.post(
+  "/login",
   body("email").isEmail().withMessage("Email not valid"),
   body("password").isString().isLength({ min: 1 }),
-  csrfProtection,
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).send("Invalid payload");
@@ -149,7 +149,7 @@ app.post("/login",
   }
 );
 
-app.post("/logout", csrfProtection, (req, res) => {
+app.post("/logout", (req, res) => {
   req.session.destroy(() => res.redirect("/login"));
 });
 
@@ -157,8 +157,8 @@ app.get("/register", (req, res) => {
   res.render("register", { csrfToken: req.csrfToken() });
 });
 
-app.post("/register",
-  csrfProtection,
+app.post(
+  "/register",
   body("email").isEmail(),
   body("password").isString().isLength({ min: 6 }),
   body("first_name").optional().isString(),
@@ -187,20 +187,16 @@ app.get("/forgot", (req, res) => {
   res.render("forgot", { csrfToken: req.csrfToken() });
 });
 
-app.post("/forgot",
-  csrfProtection,
-  body("email").isEmail(),
-  async (req, res) => {
-    const email = safeLower(req.body.email);
-    const user = await userByEmail(email);
-    if (!user) return res.status(200).send("If user exists, email sent");
+app.post("/forgot", body("email").isEmail(), async (req, res) => {
+  const email = safeLower(req.body.email);
+  const user = await userByEmail(email);
+  if (!user) return res.status(200).send("If user exists, email sent");
 
-    const token = nanoid(32);
-    await insertReset({ user_id: user.id, token, expires_at: dayjs().add(1, "hour").toISOString() });
-    await sendResetMail(email, token);
-    res.send("If user exists, email sent");
-  }
-);
+  const token = nanoid(32);
+  await insertReset({ user_id: user.id, token, expires_at: dayjs().add(1, "hour").toISOString() });
+  await sendResetMail(email, token);
+  res.send("If user exists, email sent");
+});
 
 app.get("/reset/:token", async (req, res) => {
   const record = await resetByToken(req.params.token);
@@ -208,17 +204,13 @@ app.get("/reset/:token", async (req, res) => {
   res.render("reset", { token: req.params.token, csrfToken: req.csrfToken() });
 });
 
-app.post("/reset/:token",
-  csrfProtection,
-  body("password").isString().isLength({ min: 6 }),
-  async (req, res) => {
-    const rec = await resetByToken(req.params.token);
-    if (!rec) return res.status(400).send("Invalid or expired");
-    await updateUserPassword(rec.user_id, await bcrypt.hash(String(req.body.password), 10));
-    await markResetUsed(req.params.token);
-    res.redirect("/login");
-  }
-);
+app.post("/reset/:token", body("password").isString().isLength({ min: 6 }), async (req, res) => {
+  const rec = await resetByToken(req.params.token);
+  if (!rec) return res.status(400).send("Invalid or expired");
+  await updateUserPassword(rec.user_id, await bcrypt.hash(String(req.body.password), 10));
+  await markResetUsed(req.params.token);
+  res.redirect("/login");
+});
 
 /* ------------------ פעולות משתמש ------------------ */
 
@@ -240,6 +232,7 @@ app.post("/unreserve", requireAuth, async (req, res) => {
 });
 
 /* ------------------ פעולות אדמין ------------------ */
+
 app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
   await clearSlotReservation(Number(req.params.slotId));
   await broadcastSlots();
@@ -325,7 +318,6 @@ cron.schedule("0 15 * * *", async () => {
     console.error("Daily clear-all failed:", e);
   }
 }, { timezone: "Asia/Jerusalem" });
-
 
 // 404
 app.use((req, res) => res.status(404).send("Not Found"));
