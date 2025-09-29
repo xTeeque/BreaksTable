@@ -5,8 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>הרשמה</title>
   <link rel="stylesheet" href="/style.css">
+  <style>
+    .auth-page .page{
+      min-height:100svh; display:flex; align-items:center; justify-content:center; padding:24px;
+    }
+    .auth-page .card{ width:100%; max-width:420px; }
+    .auth-page form > div{ margin-bottom:10px; }
+    .auth-page input[type="email"], .auth-page input[type="password"], .auth-page input[type="tel"], .auth-page input[type="text"]{
+      width:100%; box-sizing:border-box;
+    }
+    .auth-page .actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  </style>
 </head>
-<body>
+<body class="auth-page">
   <div class="page">
     <div class="card">
       <h1>הרשמה</h1>
@@ -43,8 +54,9 @@
           <input name="phone" type="tel" placeholder="0521234567" inputmode="tel">
         </div>
 
-        <div style="margin-top:10px">
+        <div class="actions" style="margin-top:10px">
           <button class="badge" type="submit">צור חשבון</button>
+          <a class="badge" href="/login">כבר יש לך חשבון?</a>
         </div>
       </form>
     </div>
