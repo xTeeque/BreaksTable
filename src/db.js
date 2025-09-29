@@ -15,7 +15,7 @@ async function migrateSlotsSchema() {
       id SERIAL PRIMARY KEY,
       label TEXT DEFAULT '',
       color TEXT DEFAULT '#e0f2fe',
-      time_label TEXT,
+      time_label TEXT,            -- ייתכן שב-DB שלך מוגדר NOT NULL; אנחנו לא נכניס לעולם NULL
       col_index INT,
       row_index INT,
       active BOOLEAN DEFAULT TRUE,
@@ -145,19 +145,17 @@ export async function seedSlotsIfEmpty() {
 }
 
 /**
- * דואג שתמיד יהיו בדיוק 4 משבצות לשעה נתונה:
- * - יוצר חסרות (col_index 1..4)
- * - מוחק כפילויות ומשאיר id הנמוך
- * - קובע row_index קבוע לשעה
- * - שתי הראשונות active=true, שתי האחרונות=false
- * - איפוס label/color/admin_lock למשבצות לא תפוסות
+ * דואג שתמיד יהיו בדיוק 4 משבצות לשעה נתונה.
+ * הערה חשובה: timeLabel חייב להיות מחרוזת לא-ריקה.
  */
 export async function normalizeSlotsToFour(timeLabel) {
-  // 1) הסר רווחים ושורות שגויות
-  await pool.query(`UPDATE slots SET time_label=TRIM(time_label) WHERE time_label IS NOT NULL`);
-  await pool.query(`DELETE FROM slots WHERE time_label IS NULL OR time_label=''`);
+  const tl = (timeLabel ?? "").toString().trim();
+  if (!tl) {
+    // הגנה: לא להכניס לעולם NULL/ריק ל-time_label
+    throw new Error("normalizeSlotsToFour: timeLabel is required (non-empty)");
+  }
 
-  // 2) מחק כפילויות (שמור את ה-id הנמוך לכל (time_label,col_index))
+  // 1) מחק כפילויות (שמור את ה-id הנמוך לכל (time_label,col_index))
   await pool.query(`
     WITH keep AS (
       SELECT MIN(id) AS keep_id, time_label, col_index
@@ -170,42 +168,45 @@ export async function normalizeSlotsToFour(timeLabel) {
     WHERE s.time_label = k.time_label
       AND s.col_index  = k.col_index
       AND s.id <> k.keep_id
-  `, [timeLabel]);
+  `, [tl]);
 
-  // 3) צור חסרות כך שתמיד יהיו 1..4
+  // 2) צור חסרות כך שתמיד יהיו col_index 1..4
   const { rows: rIdx } = await pool.query(
     `SELECT COALESCE(MIN(row_index), 1)::int AS row_index FROM slots WHERE time_label=$1`,
-    [timeLabel]
+    [tl]
   );
   const rowIndex = rIdx[0]?.row_index ?? 1;
 
   for (let col = 1; col <= 4; col++) {
     const { rows: exists } = await pool.query(
       `SELECT id FROM slots WHERE time_label=$1 AND col_index=$2 LIMIT 1`,
-      [timeLabel, col]
+      [tl, col]
     );
     if (!exists.length) {
       await pool.query(
         `INSERT INTO slots (label, color, time_label, col_index, row_index, active, admin_lock)
          VALUES ('', '#e0f2fe', $1, $2, $3, $4, false)`,
-        [timeLabel, col, rowIndex, col <= 2]
+        [tl, col, rowIndex, col <= 2]
       );
     }
   }
 
-  // 4) מחק עמודות לא חוקיות
-  await pool.query(`DELETE FROM slots WHERE col_index < 1 OR col_index > 4 AND time_label=$1`, [timeLabel]);
-
-  // 5) קבע row_index קבוע לשעה
-  await pool.query(`UPDATE slots SET row_index=$2 WHERE time_label=$1`, [timeLabel, rowIndex]);
-
-  // 6) שתי הראשונות פתוחות, שתיים סגורות
+  // 3) מחק עמודות לא חוקיות
   await pool.query(
-    `UPDATE slots SET active = CASE WHEN col_index IN (1,2) THEN TRUE ELSE FALSE END WHERE time_label=$1`,
-    [timeLabel]
+    `DELETE FROM slots WHERE time_label=$1 AND (col_index < 1 OR col_index > 4)`,
+    [tl]
   );
 
-  // 7) איפוס צבע/טקסט/נעילה למשבצות שאינן תפוסות
+  // 4) קבע row_index קבוע לשעה
+  await pool.query(`UPDATE slots SET row_index=$2 WHERE time_label=$1`, [tl, rowIndex]);
+
+  // 5) שתי הראשונות פתוחות, שתיים סגורות
+  await pool.query(
+    `UPDATE slots SET active = CASE WHEN col_index IN (1,2) THEN TRUE ELSE FALSE END WHERE time_label=$1`,
+    [tl]
+  );
+
+  // 6) איפוס צבע/טקסט/נעילה למשבצות שאינן תפוסות
   await pool.query(`
     UPDATE slots s
     SET color = '#e0f2fe',
@@ -213,7 +214,7 @@ export async function normalizeSlotsToFour(timeLabel) {
         admin_lock = false
     WHERE s.time_label = $1
       AND NOT EXISTS (SELECT 1 FROM reservations r WHERE r.slot_id = s.id)
-  `, [timeLabel]);
+  `, [tl]);
 }
 
 export async function setSlotActive(slotId, active) {
@@ -239,10 +240,13 @@ export async function updateSlot(slotId, { label, color, time_label, col_index, 
 }
 
 export async function createSlot({ label, color, time_label, col_index, row_index, active }) {
+  const tl = (time_label ?? "").toString().trim();
+  if (!tl) throw new Error("createSlot: time_label is required");
+
   await pool.query(
     `INSERT INTO slots (label, color, time_label, col_index, row_index, active, admin_lock)
      VALUES ($1,$2,$3,$4,$5,$6,false)`,
-    [label || "", color || "#e0f2fe", time_label, col_index, row_index, !!active]
+    [label || "", color || "#e0f2fe", tl, col_index, row_index, !!active]
   );
 }
 
@@ -252,7 +256,6 @@ export async function deleteSlot(slotId) {
 }
 
 export async function clearUserReservation(userId) {
-  // מחיקת הרשמה של המשתמש (אם קיימת) ואיפוס התא
   const { rows } = await pool.query(`DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`, [userId]);
   const slotId = rows[0]?.slot_id;
   if (slotId) {
@@ -270,7 +273,6 @@ export async function reserveSlot(userId, slotId) {
   try {
     await client.query("BEGIN");
 
-    // נעל את המשבצת ובדוק שהיא פעילה ולא נעולה ע"י אדמין
     const { rows: srows } = await client.query(
       `SELECT id, active, admin_lock FROM slots WHERE id=$1 FOR UPDATE`,
       [slotId]
@@ -285,10 +287,8 @@ export async function reserveSlot(userId, slotId) {
       throw new Error("המשבצת תפוסה ע\"י אדמין");
     }
 
-    // ודא משבצת אחת למשתמש: נקה הרשמה קודמת
     await client.query(`DELETE FROM reservations WHERE user_id=$1`, [userId]);
 
-    // נסה לתפוס — אם תפוס כבר, נכשל
     const ins = await client.query(
       `INSERT INTO reservations (slot_id, user_id)
        VALUES ($1, $2)
@@ -300,7 +300,6 @@ export async function reserveSlot(userId, slotId) {
       throw new Error('המשבצת כבר נתפסה על ידי משתמש אחר');
     }
 
-    // עדכן שם/צבע
     const { rows: urows } = await client.query(
       `SELECT first_name, last_name FROM users WHERE id=$1`,
       [userId]
