@@ -6,16 +6,32 @@
   <title>איפוס סיסמה</title>
   <link rel="stylesheet" href="/style.css">
   <style>
-    .auth-page .page{
-      min-height:100svh; display:flex; align-items:center; justify-content:center; padding:24px;
+    body.auth-luxe{
+      background:
+        radial-gradient(1200px 600px at 100% -10%, #f3f4f6 20%, transparent 70%),
+        radial-gradient(900px 500px at -10% 100%, #eef2ff 10%, transparent 60%),
+        #ffffff;
     }
-    .auth-page .card{ width:100%; max-width:420px; }
-    .auth-page form > div{ margin-bottom:10px; }
-    .auth-page input[type="password"]{ width:100%; box-sizing:border-box; }
-    .auth-page .actions{ display:flex; gap:8px; flex-wrap:wrap; }
+    .auth-luxe .page{
+      min-height:100svh;
+      display:flex; align-items:center; justify-content:center;
+      padding:24px;
+    }
+    .auth-luxe .card{
+      width:100%; max-width:560px;
+      padding:28px 28px;
+      border-radius:20px;
+      border:1px solid #e5e7eb;
+      box-shadow:0 10px 30px rgba(0,0,0,.08);
+      background:#fff;
+    }
+    .auth-luxe h1{ margin-top:0; margin-bottom:14px; }
+    .auth-luxe form > div{ margin-bottom:12px; }
+    .auth-luxe input[type="password"]{ width:100%; box-sizing:border-box; }
+    .auth-luxe .actions{ display:flex; gap:8px; flex-wrap:wrap; }
   </style>
 </head>
-<body class="auth-page">
+<body class="auth-luxe">
   <div class="page">
     <div class="card">
       <h1>בחירת סיסמה חדשה</h1>
@@ -31,7 +47,7 @@
           <input name="password" type="password" minlength="6" required>
         </div>
 
-        <div class="actions" style="margin-top:10px">
+        <div class="actions" style="margin-top:6px">
           <button class="badge" type="submit">אפס סיסמה</button>
           <a class="badge" href="/login">חזרה להתחברות</a>
         </div>
