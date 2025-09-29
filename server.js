@@ -64,10 +64,13 @@ async function broadcastSlots() {
   try { io.emit("slots:update", { at: Date.now() }); } catch (e) { console.error("broadcast error:", e); }
 }
 
+// אבטחה/פרסרים/לוגים
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(morgan("dev"));
+
+// סטטי — כמו קודם, ישירות מתיקיית public
 app.use(express.static(path.join(__dirname, "public")));
 
 const PgStore = pgSimpleFactory(session);
@@ -224,7 +227,7 @@ app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async 
   return res.json({ ok: true });
 });
 
-// עדכון כללי (ללא שינוי לוגיקת זמן ברמת שעה)
+// עדכון כללי
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     slot_id: Number(req.body.slot_id),
@@ -239,7 +242,7 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// ✅ שעות: הוספה/שינוי (עם אימות HH:MM)
+// שעות: הוספה/שינוי
 app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, res) => {
   const tl = (req.body.time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
@@ -261,24 +264,10 @@ app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, r
   }
 });
 
-// יצירה/מחיקה של משבצת בודדת (אם תרצה להשאיר)
-app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
-  const payload = {
-    label: nullableTrim(req.body.label) || "",
-    color: nullableTrim(req.body.color) || "#e0f2fe",
-    time_label: String(req.body.time_label),
-    col_index: Number(req.body.col_index),
-    row_index: Number(req.body.row_index),
-    active: req.body.active !== "false",
-  };
-  await createSlot(payload);
-  await broadcastSlots();
-  res.redirect("/");
-});
-
-app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, res) => {
-  const id = Number(req.body.slot_id);
-  await deleteSlot(id);
+// ✅ ניקוי כללי (לכפתור בטופ-בר)
+app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
+  await pool.query(`DELETE FROM reservations;`);
+  await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false;`);
   await broadcastSlots();
   res.json({ ok: true });
 });
