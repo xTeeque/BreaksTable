@@ -1,133 +1,128 @@
-<!doctype html>
-<html lang="he" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>דשבורד</title>
-  <link rel="stylesheet" href="/style.css">
-</head>
-<body data-role="<%= (typeof user !== 'undefined' && user && user.role) ? user.role : 'user' %>">
-  <%
-    // בטיחות נגד undefined
-    const U = (typeof user !== 'undefined' && user) ? user : {};
-    const SLOTS = Array.isArray(slots) ? slots : [];
-    const CSRF = (typeof csrfToken !== 'undefined' && csrfToken) ? csrfToken : '';
+// public/dashboard.js
 
-    // מפיקים רשימת שעות דינמית מהנתונים (מסודרת "HH:MM")
-    const HOURS = [...new Set(SLOTS.map(s => s.time_label))].sort((a,b) => String(a).localeCompare(String(b)));
+// --- Utils ---
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": window.CSRF_TOKEN || ""
+    },
+    body: JSON.stringify(body || {})
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(txt || `HTTP ${res.status}`);
+  }
+  return await res.json().catch(() => ({}));
+}
 
-    // קיבוץ לפי שעה
-    const byHour = {};
-    SLOTS.forEach(s => {
-      if (!byHour[s.time_label]) byHour[s.time_label] = [];
-      byHour[s.time_label].push(s);
-    });
+function qs(sel, root) { return (root || document).querySelector(sel); }
+function qsa(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
+const isAdmin = (document.body.dataset.role === "admin");
 
-    function fourFor(t) {
-      const arr = (byHour[t] || []).slice().sort((a,b) => {
-        if ((a.row_index ?? 0) !== (b.row_index ?? 0)) return (a.row_index ?? 0) - (b.row_index ?? 0);
-        return (a.col_index ?? 0) - (b.col_index ?? 0);
-      });
-      // אם פחות מ-4, משלימים ויזואלית (לא נוגעים בבסיס הנתונים כאן)
-      while (arr.length < 4) arr.push({
-        slot_id: -1,
-        label: '',
-        color: '#e0f2fe',
-        time_label: t,
-        col_index: arr.length+1,
-        row_index: 0,
-        active: false,
-        user_id: null,
-        admin_lock: false,
-      });
-      return arr.slice(0,4);
+// --- Topbar actions ---
+const btnClearAll = document.getElementById("btn-clear-all");
+if (btnClearAll) {
+  btnClearAll.addEventListener("click", async () => {
+    if (!confirm("לנקות את כל המשבצות?")) return;
+    try { await postJSON("/admin/clear-all", {}); location.reload(); }
+    catch (err) { alert("נכשל ניקוי כללי: " + (err.message || err)); }
+  });
+}
+
+const btnAddHour = document.getElementById("btn-add-hour");
+if (btnAddHour) {
+  btnAddHour.addEventListener("click", async () => {
+    const tl = prompt("שעה חדשה (HH:MM):", "");
+    if (tl === null) return;
+    if (!/^[0-2]\d:\d{2}$/.test(tl)) { alert("פורמט שעה לא תקין (HH:MM)"); return; }
+    try {
+      await postJSON("/admin/hours/create", { time_label: tl });
+      location.reload();
+    } catch (err) { alert(err.message || "Create hour failed"); }
+  });
+}
+
+// --- Grid actions ---
+const grid = document.getElementById("grid");
+if (grid) {
+  grid.addEventListener("click", async (e) => {
+    // עריכת שעה ע"י אדמין: לחיצה על תא השעה הימני
+    const timeCell = e.target.closest(".cell.time");
+    if (isAdmin && timeCell) {
+      const from = timeCell.getAttribute("data-time") || timeCell.textContent.trim();
+      const to = prompt(`ערוך שעה (HH:MM)\nנוכחי: ${from}`, from);
+      if (to === null || to === from) return;
+      if (!/^[0-2]\d:\d{2}$/.test(to)) { alert("פורמט שעה לא תקין (HH:MM)"); return; }
+      try {
+        await postJSON("/admin/hours/rename", { from, to });
+        location.reload();
+      } catch (err) { alert(err.message || "Rename hour failed"); }
+      return;
     }
-  %>
 
-  <div class="page">
-    <div class="card topbar">
-      <div class="left">
-        <% if (U.role === 'admin') { %>
-          <button id="btn-add-hour" class="badge">הוסף שעה</button>
-          <button id="btn-clear-all" class="badge danger">ניקוי כללי</button>
-        <% } %>
-      </div>
+    // משבצת רגילה
+    const cell = e.target.closest("[data-slot-id]");
+    if (!cell) return;
 
-      <div class="right">
-        <span>שלום <strong><%= [U.first_name || "", U.last_name || ""].join(" ").trim() %></strong></span>
-        <form method="post" action="/logout" class="inline">
-          <input type="hidden" name="_csrf" value="<%= CSRF %>">
-          <button type="submit" class="badge">התנתקות</button>
-        </form>
-      </div>
-    </div>
+    const slotId = Number(cell.dataset.slotId);
+    const mine = cell.dataset.mine === "1";
+    const taken = cell.dataset.taken === "1";
+    const active = cell.dataset.active === "1";
 
-    <div class="card">
-      <p class="muted">
-        משבצת נחשבת <strong>“תפוס”</strong> אם יש הרשמה או אם אדמין נעל אותה עם שם מותאם.
-      </p>
+    // פעולות אדמין בתוך תא
+    if (isAdmin && e.target.closest("[data-action='clear']")) {
+      try { await postJSON(`/admin/slots/${slotId}/clear`, {}); location.reload(); } catch (err) { alert(err.message); }
+      return;
+    }
+    if (isAdmin && e.target.closest("[data-action='open']")) {
+      try { await postJSON(`/admin/slots/${slotId}/active`, { active: true }); location.reload(); } catch (err) { alert(err.message); }
+      return;
+    }
+    if (isAdmin && e.target.closest("[data-action='close']")) {
+      try { await postJSON(`/admin/slots/${slotId}/active`, { active: false }); location.reload(); } catch (err) { alert(err.message); }
+      return;
+    }
+    if (isAdmin && e.target.closest("[data-action='label']")) {
+      const name = prompt("שם שיוצג במשבצת (אפשר להשאיר ריק כדי לנקות):", "");
+      if (name === null) return;
+      try { await postJSON(`/admin/slots/${slotId}/label`, { label: String(name).trim() }); location.reload(); } catch (err) { alert(err.message); }
+      return;
+    }
 
-      <div id="grid" class="grid">
-        <% HOURS.forEach(time => { const cells = fourFor(time); %>
-          <!-- תא שעה (לחיץ לאדמין לעריכת השעה) -->
-          <div class="cell time" data-time="<%= time %>">
-            <span class="time-text"><%= time %></span>
-            <% if (U.role === 'admin') { %>
-              <span class="edit-hint">ערוך</span>
-            <% } %>
-          </div>
+    // משתמש רגיל: הרשמה / ביטול
+    try {
+      if (!active) return;                 // סגור
+      if (!mine && !taken)      { await postJSON(`/reserve/${slotId}`, {}); }
+      else if (mine)            { await postJSON(`/unreserve`, {}); }
+      else                      { return; }    // תפוס אצל אחר
+      location.reload();
+    } catch (err) {
+      alert(err.message || "Action failed");
+    }
+  });
 
-          <!-- ארבע משבצות -->
-          <% cells.forEach(s => {
-               const sid = Number(s.slot_id || -1);
-               const hasUser = !!s.user_id;
-               const adminLocked = !!s.admin_lock;
-               const taken = hasUser || adminLocked;
-               const mine  = hasUser && U.id && (s.user_id === U.id);
-               const active = !!s.active;
-               const showName = taken ? (s.label || '') : '';
-               const bg = taken ? '#86efac' : (s.color || '#e0f2fe'); // צבע מגיע מהשרת/DB
-               const disabledForUser = (!active || (taken && !mine));
-          %>
-            <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
-                 style="background:<%= bg %>"
-                 data-slot-id="<%= sid %>"
-                 data-taken="<%= taken ? '1' : '0' %>"
-                 data-mine="<%= mine ? '1' : '0' %>"
-                 data-active="<%= active ? '1' : '0' %>">
+  // מחיקת משבצת (טופסי מחיקה)
+  qsa('form[data-action="delete"]').forEach((form) => {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const slotId = Number(form.querySelector('[name="slot_id"]').value);
+      if (!confirm("למחוק את המשבצת?")) return;
+      try {
+        await postJSON(`/admin/slots/delete`, { slot_id: slotId });
+        location.reload();
+      } catch (err) { alert(err.message || "Delete failed"); }
+    });
+  });
+}
 
-              <div class="slot-text"><%= showName %></div>
-              <div class="badge state">
-                <% if (mine) { %>שלך (הסר)
-                <% } else if (!active) { %>סגור
-                <% } else if (taken) { %>תפוס
-                <% } else { %>פנוי<% } %>
-              </div>
-
-              <% if (U.role === 'admin' && sid > 0) { %>
-                <div class="admin-actions">
-                  <button class="badge" type="button" data-action="clear">נקה</button>
-                  <% if (active) { %>
-                    <button class="badge danger" type="button" data-action="close">סגור</button>
-                  <% } else { %>
-                    <button class="badge success" type="button" data-action="open">פתח</button>
-                  <% } %>
-                  <button class="badge info" type="button" data-action="label">ערוך שם</button>
-                  <form class="inline" data-action="delete">
-                    <input type="hidden" name="slot_id" value="<%= sid %>">
-                    <button class="badge danger" type="submit">מחק</button>
-                  </form>
-                </div>
-              <% } %>
-            </div>
-          <% }) %>
-        <% }) %>
-      </div>
-    </div>
-  </div>
-
-  <script>window.CSRF_TOKEN = "<%= CSRF %>"</script>
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="/dashboard.js" defer></script>
-</body>
-</html>
+// ---- Socket.IO (רענון חי) ----
+(function initRealtime(){
+  try {
+    if (typeof io === "undefined") return;
+    const socket = io({ transports: ["websocket", "polling"] });
+    socket.on("slots:update", () => location.reload());
+  } catch { /* no-op */ }
+})();
