@@ -8,15 +8,11 @@
 </head>
 <body data-role="<%= (typeof user !== 'undefined' && user && user.role) ? user.role : 'user' %>">
   <%
-    // בטיחות נגד undefined
     const U = (typeof user !== 'undefined' && user) ? user : {};
     const SLOTS = Array.isArray(slots) ? slots : [];
     const CSRF = (typeof csrfToken !== 'undefined' && csrfToken) ? csrfToken : '';
-
-    // שעות מוצגות (התאם כאן במידת הצורך)
     const HOURS = ["12:50","13:25","14:00","14:35"];
 
-    // קיבוץ לפי שעה
     const byHour = {};
     SLOTS.forEach(s => {
       if (!byHour[s.time_label]) byHour[s.time_label] = [];
@@ -28,16 +24,9 @@
         if ((a.row_index ?? 0) !== (b.row_index ?? 0)) return (a.row_index ?? 0) - (b.row_index ?? 0);
         return (a.col_index ?? 0) - (b.col_index ?? 0);
       });
-      // אם פחות מ-4, משלימים ויזואלית (לא נוגעים בבסיס הנתונים כאן)
       while (arr.length < 4) arr.push({
-        slot_id: -1,
-        label: '',
-        color: '#e0f2fe',
-        time_label: t,
-        col_index: arr.length+1,
-        row_index: 0,
-        active: false,
-        user_id: null
+        slot_id: -1, label: '', color: '#e0f2fe', time_label: t, col_index: arr.length+1,
+        row_index: 0, active: false, user_id: null, admin_lock: false
       });
       return arr.slice(0,4);
     }
@@ -47,15 +36,13 @@
     <div class="topbar" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
       <% if (U.role === 'admin') { %>
         <button id="btn-clear-all" class="badge danger">ניקוי כללי</button>
-
-        <!-- טופס הוספת משבצת (חסין גם אם csrfToken לא הועבר) -->
         <form id="add-slot-form" class="inline" method="post" action="/admin/slots/create" style="display:inline-flex; gap:6px; align-items:center">
           <input type="hidden" name="_csrf" value="<%= CSRF %>">
           <input name="label" placeholder="טקסט בתא (לא חובה)" style="width:140px">
           <input name="time_label" placeholder="שעה (HH:MM)" required pattern="^\\d{2}:\\d{2}$" style="width:110px">
           <input name="col_index" placeholder="עמודה (1-4)" type="number" min="1" max="4" required style="width:90px">
           <input name="row_index" placeholder="שורה" type="number" min="0" required style="width:80px">
-          <input type="hidden" name="color" value="#e5e7eb">
+          <input type="hidden" name="color" value="#e0f2fe">
           <input type="hidden" name="active" value="true">
           <button class="badge" type="submit">הוסף משבצת</button>
         </form>
@@ -72,22 +59,21 @@
     </div>
 
     <p class="muted">
-      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות.
-      משבצת תפוסה נצבעת בירוק. (אדמין: פתיחה/סגירה/ניקוי/עריכת שם/עריכת שעה/מחיקה)
+      משבצת נחשבת <strong>“תפוס”</strong> אם יש הרשמה או אם אדמין נעל אותה עם שם מותאם.
     </p>
 
     <div id="grid" class="grid">
       <% HOURS.forEach(time => { const cells = fourFor(time); %>
-        <!-- תא שעה -->
         <div class="cell time"><%= time %></div>
 
-        <!-- ארבע משבצות -->
         <% cells.forEach(s => {
              const sid = Number(s.slot_id || -1);
-             const taken = !!s.user_id;
-             const mine  = taken && U.id && (s.user_id === U.id);
+             const hasUser = !!s.user_id;
+             const adminLocked = !!s.admin_lock;
+             const taken = hasUser || adminLocked;        // ← תפוס גם אם admin_lock=true
+             const mine  = hasUser && U.id && (s.user_id === U.id);
              const active = !!s.active;
-             const showName = taken || (U.role === 'admin' && (s.label || '').trim());
+             const showName = taken ? (s.label || '') : ''; // בשם אדמין או משתמש
              const bg = taken ? '#86efac' : (s.color || '#e0f2fe');
              const disabledForUser = (!active || (taken && !mine));
         %>
@@ -98,7 +84,7 @@
                data-mine="<%= mine ? '1' : '0' %>"
                data-active="<%= active ? '1' : '0' %>">
 
-            <div class="slot-text"><%= showName ? (s.label || '') : '' %></div>
+            <div class="slot-text"><%= showName %></div>
             <div class="badge">
               <% if (mine) { %>שלך (הסר)
               <% } else if (!active) { %>סגור
