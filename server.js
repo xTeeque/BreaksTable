@@ -39,14 +39,13 @@ import {
 import {
   requireAuth,
   requireRole,
-  // הסרנו csrfErrorHandler כי אינו קיים ב-export
-  // csrfErrorHandler,
   nullableTrim,
   safeLower,
   safeString,
 } from "./src/middleware/auth.js";
 
-import { sendResetMail } from "./src/mailer.js";
+// ✅ ייבוא נכון (במקום sendResetMail)
+import { sendPasswordReset } from "./src/mailer.js";
 
 dayjs.locale("he");
 
@@ -91,16 +90,15 @@ app.use(session({
     httpOnly: true,
     sameSite: "lax",
     secure: !!process.env.COOKIE_SECURE,
-    maxAge: 1000 * 60 * 60 * 24 * 14, // 14 יום
+    maxAge: 1000 * 60 * 60 * 24 * 14,
   },
 }));
 
 // CSRF
 const csrfProtection = csrf();
-// הפעלה גלובלית כך ש-req.csrfToken() זמין בכל route שמרנדר תבנית
 app.use(csrfProtection);
 
-// שיעורי בקשה
+// Rate limit
 const limiter = rateLimit({ windowMs: 60_000, max: 300 });
 app.use(limiter);
 
@@ -123,9 +121,8 @@ app.get("/login", (req, res) => {
   res.render("login", { csrfToken: req.csrfToken() });
 });
 
-app.post(
-  "/login",
-  body("email").isEmail().withMessage("Email not valid"),
+app.post("/login",
+  body("email").isEmail(),
   body("password").isString().isLength({ min: 1 }),
   async (req, res) => {
     const errors = validationResult(req);
@@ -157,8 +154,7 @@ app.get("/register", (req, res) => {
   res.render("register", { csrfToken: req.csrfToken() });
 });
 
-app.post(
-  "/register",
+app.post("/register",
   body("email").isEmail(),
   body("password").isString().isLength({ min: 6 }),
   body("first_name").optional().isString(),
@@ -194,7 +190,7 @@ app.post("/forgot", body("email").isEmail(), async (req, res) => {
 
   const token = nanoid(32);
   await insertReset({ user_id: user.id, token, expires_at: dayjs().add(1, "hour").toISOString() });
-  await sendResetMail(email, token);
+  await sendPasswordReset(email, token); // ✅ שימוש בשם הנכון
   res.send("If user exists, email sent");
 });
 
@@ -247,12 +243,10 @@ app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async
   res.json({ ok: true });
 });
 
-// *** עודכן: כשאדמין משנה שם – קודם מנקים רשומה קיימת ואז קובעים label ***
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
 
-  // Clear any existing reservation on this slot, then set label/color
   await clearSlotReservation(slotId);
   await updateSlot(slotId, { label, color: label ? "#86efac" : "#e5e7eb" });
 
@@ -260,7 +254,6 @@ app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async 
   return res.json({ ok: true });
 });
 
-// שינוי מאפייני משבצת (כולל time_label)
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     slot_id: Number(req.body.slot_id),
@@ -275,7 +268,6 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// יצירה/מחיקה של משבצת
 app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     label: nullableTrim(req.body.label) || "",
@@ -297,17 +289,13 @@ app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// ניקוי כללי ע"י אדמין
 app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
-  // ניקוי כל הרשמות + איפוס תאים לצבע/טקסט ברירת מחדל
   await pool.query(`DELETE FROM reservations;`);
   await pool.query(`UPDATE slots SET label='', color='#e0f2fe';`);
   await broadcastSlots();
   res.json({ ok: true });
 });
 
-/* ------------------ תזמון יומי (אופציונלי) ------------------ */
-// דוגמה: ניקוי כללי כל יום בשעה 15:00 לפי Asia/Jerusalem
 cron.schedule("0 15 * * *", async () => {
   try {
     await pool.query(`DELETE FROM reservations;`);
@@ -319,10 +307,8 @@ cron.schedule("0 15 * * *", async () => {
   }
 }, { timezone: "Asia/Jerusalem" });
 
-// 404
 app.use((req, res) => res.status(404).send("Not Found"));
 
-// Start
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
