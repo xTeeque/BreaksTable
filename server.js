@@ -31,6 +31,8 @@ import {
   clearSlotReservation,
   setSlotActive,
   updateSlot,
+  createSlot,
+  deleteSlot,
   createHour,
   renameHour,
   deleteHour,
@@ -59,53 +61,41 @@ async function broadcastSlots() {
   try { io.emit("slots:update", { at: Date.now() }); } catch (e) { console.error("broadcast error:", e); }
 }
 
-// ---------- Normalization helpers ----------
+/* ---------- Normalization helpers (טלפון ישראלי -> E.164) ---------- */
 function normalizeILPhone(input) {
   if (input == null) return null;
   let s = String(input).trim();
   if (s === "") return null;
-
-  // השאר רק ספרות ו"+" בתחילה (אם יש)
   s = s.replace(/[^\d+]/g, "");
-
-  // כבר בפורמט בינלאומי
   if (s.startsWith("+")) {
     if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
     return s;
   }
-
-  // מתחיל ב-972 ללא פלוס
   if (s.startsWith("972")) {
     s = "+" + s;
     if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
     return s;
   }
-
-  // פורמט מקומי: 05XXXXXXXX או 5XXXXXXXX או 0X...
-  // הסר אפסים מובילים בודדים
   s = s.replace(/^0+/, "");
-  // הוסף קידומת ישראל
   s = "+972" + s;
-
   if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
   return s;
 }
-
 function e164ToLocalIL(e164) {
   if (!e164) return "";
   let s = String(e164).replace(/[^\d]/g, "");
   if (s.startsWith("972")) s = "0" + s.slice(3);
-  else if (!s.startsWith("0") && /^\d+$/.test(s)) s = "0" + s; // שמרני: אם חסר 0, הוסף
+  else if (!s.startsWith("0") && /^\d+$/.test(s)) s = "0" + s;
   return s;
 }
 
-// אבטחה/פרסרים/לוגים
+/* ---------- אבטחה/פרסרים/לוגים ---------- */
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(morgan("dev"));
 
-// סטטי
+/* ---------- סטטי ---------- */
 app.use(express.static(path.join(__dirname, "public")));
 
 const PgStore = pgSimpleFactory(session);
@@ -183,7 +173,6 @@ app.post("/register",
     const first = safeString(req.body.first_name);
     const last  = safeString(req.body.last_name);
 
-    // נירמול טלפון: קלט חופשי -> E.164 (או null אם ריק)
     let phone = safeString(req.body.phone);
     try {
       phone = phone ? normalizeILPhone(phone) : null;
@@ -201,14 +190,11 @@ app.post("/register",
   }
 );
 
-/* ---- Profile: עדכון טלפון למשתמשים קיימים ---- */
+/* ---- Profile ---- */
 app.get("/profile", requireAuth, (req, res) => {
-  const user = { ...req.session.user };
-  // הצג פורמט מקומי בשדה הקלט
-  user.phone_local = e164ToLocalIL(user.phone);
+  const user = { ...req.session.user, phone_local: e164ToLocalIL(req.session.user.phone) };
   res.render("profile", { csrfToken: req.csrfToken(), user });
 });
-
 app.post("/profile",
   requireAuth,
   body("phone").optional().isString(),
@@ -219,8 +205,6 @@ app.post("/profile",
       const user = { ...req.session.user, phone_local: e164ToLocalIL(req.session.user.phone) };
       return res.status(400).render("profile", { csrfToken: req.csrfToken(), user, error: msg });
     }
-
-    // נירמול הטלפון מהקלט החופשי
     const raw = safeString(req.body.phone);
     let normalized = null;
     try {
@@ -229,11 +213,50 @@ app.post("/profile",
       const user = { ...req.session.user, phone_local: raw };
       return res.status(400).render("profile", { csrfToken: req.csrfToken(), user, error: e.message || "מספר טלפון לא תקין" });
     }
-
     await updateUserPhone(req.session.user.id, normalized);
     req.session.user.phone = normalized;
     const user = { ...req.session.user, phone_local: e164ToLocalIL(normalized) };
     res.render("profile", { csrfToken: req.csrfToken(), user, message: "עודכן בהצלחה" });
+  }
+);
+
+/* ---- Forgot / Reset password ---- */
+app.get("/forgot", (req, res) => {
+  res.render("forgot", { csrfToken: req.csrfToken() });
+});
+
+app.post("/forgot", body("email").isEmail(), async (req, res) => {
+  const email = safeLower(req.body.email);
+  const user = await userByEmail(email);
+  const token = nanoid(32);
+  if (user) {
+    await insertReset({ user_id: user.id, token, expires_at: dayjs().add(1, "hour").toISOString() });
+    try { await sendPasswordReset(email, token); } catch (e) { console.error("sendPasswordReset failed:", e?.message || e); }
+  }
+  // אל תחשוף אם המשתמש קיים
+  res.render("forgot", { csrfToken: req.csrfToken(), message: "אם קיים חשבון עם האימייל שהוזן — נשלחה הודעת איפוס." });
+});
+
+app.get("/reset/:token", async (req, res) => {
+  const record = await resetByToken(req.params.token);
+  if (!record) return res.status(400).send("Invalid or expired");
+  res.render("reset", { token: req.params.token, csrfToken: req.csrfToken() });
+});
+
+app.post("/reset/:token",
+  body("password").isString().isLength({ min: 6 }),
+  async (req, res) => {
+    const rec = await resetByToken(req.params.token);
+    if (!rec) return res.status(400).send("Invalid or expired");
+
+    const errs = validationResult(req);
+    if (!errs.isEmpty()) {
+      return res.status(400).render("reset", { token: req.params.token, csrfToken: req.csrfToken(), error: "סיסמה חייבת להיות באורך 6 תווים ומעלה" });
+    }
+
+    await updateUserPassword(rec.user_id, await bcrypt.hash(String(req.body.password), 10));
+    await markResetUsed(req.params.token);
+    res.redirect("/login");
   }
 );
 
@@ -267,29 +290,21 @@ app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async 
 app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const active = !!req.body.active;
-
-  // אם סוגרים — מחיקים קודם את המשתמש (אם יש) ומנקים הטקסט/צבע
-  if (!active) {
-    await clearSlotReservation(slotId);
-  }
+  if (!active) { await clearSlotReservation(slotId); }
   await setSlotActive(slotId, active);
   await broadcastSlots();
   res.json({ ok: true });
 });
 
-// שינוי שם ע"י אדמין: מסיר משתמש קודם, נועל את התא, מציג שם שנבחר וצביעה ירוקה
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
-
   await clearSlotReservation(slotId);
   await updateSlot(slotId, { label, color: label ? "#86efac" : "#e0f2fe", admin_lock: !!label });
-
   await broadcastSlots();
   return res.json({ ok: true });
 });
 
-// עדכון כללי
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     slot_id: Number(req.body.slot_id),
@@ -304,7 +319,6 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// שעות: הוספה/שינוי/מחיקה
 app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, res) => {
   const tl = (req.body.time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
@@ -312,7 +326,6 @@ app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, r
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, res) => {
   const from = (req.body.from ?? "").toString().trim();
   const to   = (req.body.to ?? "").toString().trim();
@@ -325,7 +338,6 @@ app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, r
     res.status(409).send(e?.message || "Cannot rename hour");
   }
 });
-
 app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, res) => {
   const tl = (req.body.time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
@@ -334,7 +346,7 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// 404 וכו'
+/* ------------------ Errors & 404 ------------------ */
 app.use((err, req, res, next) => {
   if (err && err.code === "EBADCSRFTOKEN") {
     return res.status(403).send("Invalid CSRF token");
