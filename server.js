@@ -34,6 +34,8 @@ import {
   updateSlot,
   createSlot,
   deleteSlot,
+  createHour,
+  renameHour,
 } from "./src/db.js";
 
 import {
@@ -210,23 +212,19 @@ app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async
   res.json({ ok: true });
 });
 
-// ✅ שינוי שם ע"י אדמין: מסיר משתמש קודם, נועל את התא, מציג שם שנבחר וצביעה ירוקה
+// שינוי שם ע"י אדמין: מסיר משתמש קודם, נועל את התא, מציג שם שנבחר וצביעה ירוקה
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
 
-  await clearSlotReservation(slotId); // מסיר כל הרשמה קיימת
-  await updateSlot(slotId, {
-    label,
-    color: label ? "#86efac" : "#e0f2fe",
-    admin_lock: !!label,             // אם יש שם — נועל ע"י אדמין => נחשב "תפוס" לכולם
-  });
+  await clearSlotReservation(slotId);
+  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e0f2fe", admin_lock: !!label });
 
   await broadcastSlots();
   return res.json({ ok: true });
 });
 
-// עדכון כללי (כולל שינוי שעה)
+// עדכון כללי (ללא שינוי לוגיקת זמן ברמת שעה)
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     slot_id: Number(req.body.slot_id),
@@ -235,13 +233,35 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
     time_label: nullableTrim(req.body.time_label),
     col_index: req.body.col_index != null ? Number(req.body.col_index) : undefined,
     row_index: req.body.row_index != null ? Number(req.body.row_index) : undefined,
-    // בכוונה לא נוגעים כאן ב-admin_lock, רק בראוט ה-label
   };
   await updateSlot(payload.slot_id, payload);
   await broadcastSlots();
   res.json({ ok: true });
 });
 
+// ✅ שעות: הוספה/שינוי (עם אימות HH:MM)
+app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, res) => {
+  const tl = (req.body.time_label ?? "").toString().trim();
+  if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
+  await createHour(tl);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
+app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, res) => {
+  const from = (req.body.from ?? "").toString().trim();
+  const to   = (req.body.to ?? "").toString().trim();
+  if (!/^[0-2]\d:\d{2}$/.test(from) || !/^[0-2]\d:\d{2}$/.test(to)) return res.status(400).send("HH:MM required");
+  try {
+    await renameHour(from, to);
+    await broadcastSlots();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(409).send(e?.message || "Cannot rename hour");
+  }
+});
+
+// יצירה/מחיקה של משבצת בודדת (אם תרצה להשאיר)
 app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     label: nullableTrim(req.body.label) || "",
