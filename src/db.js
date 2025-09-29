@@ -9,16 +9,17 @@ export const pool = new Pool({
 /* ---------------- Schema init & migrations ---------------- */
 
 async function migrateSlotsSchema() {
-  // בסיס טבלת slots אם מגיעים ממבנה ישן
+  // בסיס טבלת slots
   await pool.query(`
     CREATE TABLE IF NOT EXISTS slots (
       id SERIAL PRIMARY KEY,
-      label TEXT,
-      color TEXT,
+      label TEXT DEFAULT '',
+      color TEXT DEFAULT '#e0f2fe',
       time_label TEXT,
       col_index INT,
       row_index INT,
-      active BOOLEAN DEFAULT TRUE
+      active BOOLEAN DEFAULT TRUE,
+      admin_lock BOOLEAN DEFAULT FALSE
     );
   `);
 
@@ -29,17 +30,12 @@ async function migrateSlotsSchema() {
     );
   `);
 
+  // הוספת admin_lock אם חסר
+  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS admin_lock BOOLEAN NOT NULL DEFAULT FALSE;`);
+
   // אינדקסים
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_slots_time ON slots(time_label)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_slots_row_col ON slots(row_index, col_index)`);
-
-  // עמודות ותיקוני ברירת מחדל
-  await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;`);
-  await pool.query(`ALTER TABLE slots ALTER COLUMN label SET DEFAULT '';`);
-  await pool.query(`ALTER TABLE slots ALTER COLUMN color SET DEFAULT '#e0f2fe';`);
-  await pool.query(`UPDATE slots SET label = COALESCE(label,'');`);
-  await pool.query(`UPDATE slots SET color = COALESCE(color,'#e0f2fe');`);
-  await pool.query(`UPDATE slots SET active = COALESCE(active, TRUE);`);
 }
 
 async function init() {
@@ -117,6 +113,7 @@ export async function getSlotsWithReservations() {
       s.col_index    AS col_index,
       s.row_index    AS row_index,
       s.active       AS active,
+      s.admin_lock   AS admin_lock,
       r.user_id      AS user_id
     FROM slots s
     LEFT JOIN reservations r ON r.slot_id = s.id
@@ -128,48 +125,21 @@ export async function getSlotsWithReservations() {
   return rows;
 }
 
-export async function seedSlotsIfEmpty() {
-  const { rows } = await pool.query(`SELECT COUNT(*)::int AS c FROM slots`);
-  if (rows[0].c > 0) return;
-
-  const hours = ["12:50","13:25","14:00","14:35"];
-  let rowIndex = 0;
-  for (const t of hours) {
-    for (let col = 1; col <= 4; col++) {
-      await pool.query(
-        `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
-         VALUES ('', '#e0f2fe', $1, $2, $3, $4)`,
-        [t, col, rowIndex, col <= 2] // שתי עמודות ראשונות פתוחות כברירת מחדל
-      );
-    }
-    rowIndex++;
-  }
-}
-
-export async function normalizeSlotsToFour(timeLabel) {
-  // שמירה על 4 משבצות לשעה (אם מוסיפים/מוחקים ידנית)
-  const { rows } = await pool.query(
-    `SELECT id FROM slots WHERE time_label=$1 ORDER BY col_index ASC`,
-    [timeLabel]
-  );
-  // ניתן להשלים/לעדכן לפי צורך; להשאיר פשוט כאן
-  return rows.map(r => r.id);
-}
-
 export async function setSlotActive(slotId, active) {
   await pool.query(`UPDATE slots SET active=$1 WHERE id=$2`, [!!active, slotId]);
 }
 
-export async function updateSlot(slotId, { label, color, time_label, col_index, row_index }) {
+export async function updateSlot(slotId, { label, color, time_label, col_index, row_index, admin_lock }) {
   const fields = [];
   const values = [];
   let i = 1;
 
-  if (label !== undefined)     { fields.push(`label=$${i++}`); values.push(label); }
-  if (color !== undefined)     { fields.push(`color=$${i++}`); values.push(color); }
-  if (time_label !== undefined){ fields.push(`time_label=$${i++}`); values.push(time_label); }
-  if (col_index !== undefined) { fields.push(`col_index=$${i++}`); values.push(col_index); }
-  if (row_index !== undefined) { fields.push(`row_index=$${i++}`); values.push(row_index); }
+  if (label !== undefined)      { fields.push(`label=$${i++}`); values.push(label); }
+  if (color !== undefined)      { fields.push(`color=$${i++}`); values.push(color); }
+  if (time_label !== undefined) { fields.push(`time_label=$${i++}`); values.push(time_label); }
+  if (col_index !== undefined)  { fields.push(`col_index=$${i++}`); values.push(col_index); }
+  if (row_index !== undefined)  { fields.push(`row_index=$${i++}`); values.push(row_index); }
+  if (admin_lock !== undefined) { fields.push(`admin_lock=$${i++}`); values.push(!!admin_lock); }
 
   if (!fields.length) return;
 
@@ -179,8 +149,8 @@ export async function updateSlot(slotId, { label, color, time_label, col_index, 
 
 export async function createSlot({ label, color, time_label, col_index, row_index, active }) {
   await pool.query(
-    `INSERT INTO slots (label, color, time_label, col_index, row_index, active)
-     VALUES ($1,$2,$3,$4,$5,$6)`,
+    `INSERT INTO slots (label, color, time_label, col_index, row_index, active, admin_lock)
+     VALUES ($1,$2,$3,$4,$5,$6,false)`,
     [label || "", color || "#e0f2fe", time_label, col_index, row_index, !!active]
   );
 }
@@ -191,17 +161,17 @@ export async function deleteSlot(slotId) {
 }
 
 export async function clearUserReservation(userId) {
-  // ניקוי המשבצת שאוחז בה המשתמש (אם קיימת) והחזרת התא לברירת מחדל
+  // מחיקת הרשמה של המשתמש (אם קיימת) ואיפוס התא
   const { rows } = await pool.query(`DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`, [userId]);
   const slotId = rows[0]?.slot_id;
   if (slotId) {
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [slotId]);
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false WHERE id=$1`, [slotId]);
   }
 }
 
 export async function clearSlotReservation(slotId) {
   await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
-  await pool.query(`UPDATE slots SET label='', color='#e0f2fe' WHERE id=$1`, [slotId]);
+  await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false WHERE id=$1`, [slotId]);
 }
 
 export async function reserveSlot(userId, slotId) {
@@ -209,9 +179,9 @@ export async function reserveSlot(userId, slotId) {
   try {
     await client.query("BEGIN");
 
-    // Lock the slot row to avoid race conditions
+    // נעל את המשבצת ובדוק שהיא פעילה ולא נעולה ע"י אדמין
     const { rows: srows } = await client.query(
-      `SELECT id, active FROM slots WHERE id=$1 FOR UPDATE`,
+      `SELECT id, active, admin_lock FROM slots WHERE id=$1 FOR UPDATE`,
       [slotId]
     );
     const slot = srows[0];
@@ -219,11 +189,15 @@ export async function reserveSlot(userId, slotId) {
       await client.query("ROLLBACK");
       throw new Error("Slot is not active");
     }
+    if (slot.admin_lock) {
+      await client.query("ROLLBACK");
+      throw new Error("המשבצת תפוסה ע\"י אדמין");
+    }
 
-    // Ensure one slot per user: clear previous reservation
+    // ודא משבצת אחת למשתמש: נקה הרשמה קודמת
     await client.query(`DELETE FROM reservations WHERE user_id=$1`, [userId]);
 
-    // Try to reserve this slot; if already taken, do nothing
+    // נסה לתפוס — אם תפוס כבר, נכשל
     const ins = await client.query(
       `INSERT INTO reservations (slot_id, user_id)
        VALUES ($1, $2)
@@ -235,14 +209,14 @@ export async function reserveSlot(userId, slotId) {
       throw new Error('המשבצת כבר נתפסה על ידי משתמש אחר');
     }
 
-    // Update slot label/color with user's full name
+    // עדכן שם/צבע
     const { rows: urows } = await client.query(
       `SELECT first_name, last_name FROM users WHERE id=$1`,
       [userId]
     );
     const fullName = `${urows[0]?.first_name || ""} ${urows[0]?.last_name || ""}`.trim();
     await client.query(
-      `UPDATE slots SET label=$1, color='#86efac' WHERE id=$2`,
+      `UPDATE slots SET label=$1, color='#86efac', admin_lock=false WHERE id=$2`,
       [fullName, slotId]
     );
 
