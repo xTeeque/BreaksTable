@@ -44,7 +44,7 @@
       </div>
 
       <div class="right">
-        <span>שלום <strong><%= [U.first_name || "", U.last_name || ""].join(" ").trim() %></strong></span>
+        <span>שלום, <strong><%= [U.first_name || "", U.last_name || ""].join(" ").trim() %></strong></span>
         <form method="post" action="/logout" class="inline">
           <input type="hidden" name="_csrf" value="<%= CSRF %>">
           <button type="submit" class="badge">התנתקות</button>
@@ -59,10 +59,11 @@
 
       <div id="grid" class="grid">
         <% HOURS.forEach(time => { const cells = fourFor(time); %>
-          <!-- תא שעה (לחיץ לאדמין לעריכת השעה) -->
+          <!-- תא שעה (לחיץ לאדמין לעריכת השעה) + כפתור הסרת שעה -->
           <div class="cell time" data-time="<%= time %>">
             <span class="time-text"><%= time %></span>
             <% if (U.role === 'admin') { %>
+              <button class="badge danger" type="button" data-action="delete-hour" data-time="<%= time %>">הסר שעה</button>
               <span class="edit-hint">ערוך</span>
             <% } %>
           </div>
@@ -103,10 +104,7 @@
                     <button class="badge success" type="button" data-action="open">פתח</button>
                   <% } %>
                   <button class="badge info" type="button" data-action="label">ערוך שם</button>
-                  <form class="inline" data-action="delete">
-                    <input type="hidden" name="slot_id" value="<%= sid %>">
-                    <button class="badge danger" type="submit">מחק</button>
-                  </form>
+                  <!-- כפתור מחיקת משבצת הוסר לפי בקשתך -->
                 </div>
               <% } %>
             </div>
