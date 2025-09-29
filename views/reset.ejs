@@ -15,7 +15,7 @@
         <p class="error"><%= error %></p>
       <% } %>
 
-      <form method="post" action="/reset/<%= token %>">
+      <form method="post" action="/reset">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
         <div>
           <label>סיסמה חדשה (לפחות 6 תווים)</label><br>
