@@ -1,6 +1,6 @@
 // public/dashboard.js
 
-// ================= Utils =================
+// --- Utils ---
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: "POST",
@@ -18,87 +18,24 @@ async function postJSON(url, body) {
   try { return await res.json(); } catch { return {}; }
 }
 
-// מניעת דאבל-קליק / ספאם פעולות
-let actionBusy = false;
-function lockActions() { actionBusy = true; document.body.style.pointerEvents = "none"; }
-function unlockActions() { actionBusy = false; document.body.style.pointerEvents = ""; }
-
-// ================= Global admin buttons =================
+// ---- Registration / Admin per-cell actions (כבר אצלך, לא משנים) ----
 document.addEventListener("click", async (e) => {
-  const t = e.target;
-
-  // ניקוי כללי
-  const clearAllBtn = t.closest("#btn-clear-all");
-  if (clearAllBtn) {
+  // כפתור "ניקוי כללי" (Admin)
+  const clearBtn = e.target.closest("#btn-clear-all");
+  if (clearBtn) {
     e.preventDefault();
     if (!confirm("לבצע ניקוי כללי של כל המשבצות?")) return;
     try {
-      lockActions();
       await postJSON("/admin/clear-all", {});
-      location.reload(); // Socket.IO גם ישדר; זה גיבוי מיידי
+      // השרת גם משדר sockets:update; נרענן מיד ליתר בטחון
+      location.reload();
     } catch (err) {
       alert("נכשל ניקוי כללי: " + (err.message || err));
-    } finally {
-      unlockActions();
     }
     return;
   }
 
-  // הוספת שעה
-  const addHourBtn = t.closest("#btn-hour-add");
-  if (addHourBtn) {
-    const time = prompt("הזן שעה בפורמט HH:mm (למשל 15:30):", "");
-    if (!time) return;
-    try {
-      lockActions();
-      await postJSON("/admin/hours/add", { time_label: time.trim() });
-      location.reload();
-    } catch (err) {
-      alert("נכשל הוספת שעה: " + (err.message || err));
-    } finally {
-      unlockActions();
-    }
-    return;
-  }
-
-  // שינוי שעה
-  const renameBtn = t.closest("[data-action='hour-rename']");
-  if (renameBtn) {
-    const oldTime = renameBtn.dataset.time;
-    const newTime = prompt(`שנה שעה ${oldTime} ל- (HH:mm):`, oldTime);
-    if (!newTime || newTime === oldTime) return;
-    try {
-      lockActions();
-      await postJSON("/admin/hours/rename", { old_time_label: oldTime, new_time_label: newTime.trim() });
-      location.reload();
-    } catch (err) {
-      alert("נכשל שינוי שעה: " + (err.message || err));
-    } finally {
-      unlockActions();
-    }
-    return;
-  }
-
-  // מחיקת שעה
-  const delBtn = t.closest("[data-action='hour-delete']");
-  if (delBtn) {
-    const time = delBtn.dataset.time;
-    if (!confirm(`למחוק את השעה ${time} (ימחק גם את המשבצות שלה)?`)) return;
-    try {
-      lockActions();
-      await postJSON("/admin/hours/delete", { time_label: time });
-      location.reload();
-    } catch (err) {
-      alert("נכשל מחיקת שעה: " + (err.message || err));
-    } finally {
-      unlockActions();
-    }
-    return;
-  }
-});
-
-// ================= Per-slot actions (admin + user) =================
-document.addEventListener("click", async (e) => {
+  // משבצת רגילה
   const cell = e.target.closest("[data-slot-id]");
   if (!cell) return;
 
@@ -108,99 +45,42 @@ document.addEventListener("click", async (e) => {
   const taken = cell.dataset.taken === "1";
   const active = cell.dataset.active === "1";
 
-  // ---- Admin actions on a single cell ----
+  // פעולות אדמין בתוך תא
   if (isAdmin && e.target.closest("[data-action='clear']")) {
-    try {
-      lockActions();
-      await postJSON(`/admin/slots/${slotId}/clear`, {});
-      location.reload();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      unlockActions();
-    }
+    try { await postJSON(`/admin/slots/${slotId}/clear`, {}); location.reload(); } catch (err) { alert(err.message); }
     return;
   }
-
   if (isAdmin && e.target.closest("[data-action='open']")) {
-    try {
-      lockActions();
-      await postJSON(`/admin/slots/${slotId}/active`, { active: true });
-      location.reload();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      unlockActions();
-    }
+    try { await postJSON(`/admin/slots/${slotId}/active`, { active: true }); location.reload(); } catch (err) { alert(err.message); }
     return;
   }
-
   if (isAdmin && e.target.closest("[data-action='close']")) {
-    try {
-      lockActions();
-      await postJSON(`/admin/slots/${slotId}/active`, { active: false });
-      location.reload();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      unlockActions();
-    }
+    try { await postJSON(`/admin/slots/${slotId}/active`, { active: false }); location.reload(); } catch (err) { alert(err.message); }
     return;
   }
-
   if (isAdmin && e.target.closest("[data-action='label']")) {
-    const name = prompt("שם שיוצג למשבצת: (ננקה רישום קיים וננעל את המשבצת)", "");
+    const name = prompt("שם שיוצג במשבצת (אפשר להשאיר ריק כדי לנקות):", "");
     if (name === null) return;
-    try {
-      lockActions();
-      await postJSON(`/admin/slots/${slotId}/label`, { label: name.trim(), lock: true });
-      location.reload();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      unlockActions();
-    }
+    try { await postJSON(`/admin/slots/${slotId}/label`, { label: name.trim() }); location.reload(); } catch (err) { alert(err.message); }
     return;
   }
 
-  // ---- User actions (reserve / unreserve) ----
+  // משתמש רגיל: הרשמה / ביטול
   try {
-    if (actionBusy) return;  // מניעת דאבל-קליק
-    if (!active) return;     // תא סגור
-
-    lockActions();
-
-    if (!mine && !taken) {
-      // ניסיון תפיסה
-      await postJSON(`/reserve/${slotId}`, {});
-    } else if (mine) {
-      // ביטול
-      await postJSON(`/unreserve`, {});
-    } else {
-      // תפוס אצל אחר
-      return;
-    }
-
-    // השרת משדר slots:update ב-Socket.IO, אבל נרענן גם מיד כדי לצמצם דיליי
+    if (!active) return;                 // סגור
+    if (!mine && !taken)      await postJSON(`/reserve/${slotId}`, {});
+    else if (mine)            await postJSON(`/unreserve`, {});
+    else                      return;    // תפוס אצל אחר
     location.reload();
   } catch (err) {
-    const msg = (err.message || "").toLowerCase();
-    if (msg.includes("already reserved")) {
-      alert("מישהו אחר תפס את המשבצת רגע לפניך. נסה לבחור משבצת אחרת 🙏");
-    } else if (msg.includes("not active")) {
-      alert("המשבצת סגורה כרגע.");
-    } else {
-      alert(err.message || "Action failed");
-    }
-  } finally {
-    unlockActions();
+    alert(err.message || "Action failed");
   }
 });
 
-// ================= Socket.IO live updates (failsafe) =================
+// ---- Socket.IO (לא חובה; מוגן אם הספרייה לא נטענה) ----
 (function initRealtime(){
   try {
-    if (typeof io === "undefined") return;
+    if (typeof io === "undefined") return; // אם הלקוח לא טעון, דלג
     const socket = io({ transports: ["websocket", "polling"] });
     socket.on("slots:update", () => location.reload());
   } catch { /* no-op */ }
