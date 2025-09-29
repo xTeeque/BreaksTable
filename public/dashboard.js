@@ -20,18 +20,28 @@ async function postJSON(url, body) {
 
 function qs(sel, root) { return (root || document).querySelector(sel); }
 function qsa(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
+const isAdmin = (document.body.dataset.role === "admin");
 
 // --- Topbar actions ---
 const btnClearAll = document.getElementById("btn-clear-all");
 if (btnClearAll) {
   btnClearAll.addEventListener("click", async () => {
     if (!confirm("לנקות את כל המשבצות?")) return;
+    try { await postJSON("/admin/clear-all", {}); location.reload(); }
+    catch (err) { alert("נכשל ניקוי כללי: " + (err.message || err)); }
+  });
+}
+
+const btnAddHour = document.getElementById("btn-add-hour");
+if (btnAddHour) {
+  btnAddHour.addEventListener("click", async () => {
+    const tl = prompt("שעה חדשה (HH:MM):", "");
+    if (tl === null) return;
+    if (!/^[0-2]\d:\d{2}$/.test(tl)) { alert("פורמט שעה לא תקין (HH:MM)"); return; }
     try {
-      await postJSON("/admin/clear-all", {});
+      await postJSON("/admin/hours/create", { time_label: tl });
       location.reload();
-    } catch (err) {
-      alert("נכשל ניקוי כללי: " + (err.message || err));
-    }
+    } catch (err) { alert(err.message || "Create hour failed"); }
   });
 }
 
@@ -39,7 +49,19 @@ if (btnClearAll) {
 const grid = document.getElementById("grid");
 if (grid) {
   grid.addEventListener("click", async (e) => {
-    const isAdmin = document.body.dataset.role === "admin";
+    // עריכת שעה ע"י אדמין: לחיצה על תא השעה הימני
+    const timeCell = e.target.closest(".cell.time");
+    if (isAdmin && timeCell) {
+      const from = timeCell.getAttribute("data-time") || timeCell.textContent.trim();
+      const to = prompt(`ערוך שעה (HH:MM)\nנוכחי: ${from}`, from);
+      if (to === null || to === from) return;
+      if (!/^[0-2]\d:\d{2}$/.test(to)) { alert("פורמט שעה לא תקין (HH:MM)"); return; }
+      try {
+        await postJSON("/admin/hours/rename", { from, to });
+        location.reload();
+      } catch (err) { alert(err.message || "Rename hour failed"); }
+      return;
+    }
 
     // משבצת רגילה
     const cell = e.target.closest("[data-slot-id]");
@@ -67,15 +89,6 @@ if (grid) {
       const name = prompt("שם שיוצג במשבצת (אפשר להשאיר ריק כדי לנקות):", "");
       if (name === null) return;
       try { await postJSON(`/admin/slots/${slotId}/label`, { label: String(name).trim() }); location.reload(); } catch (err) { alert(err.message); }
-      return;
-    }
-    if (isAdmin && e.target.closest("[data-action='time']")) {
-      const newTime = prompt("שעה חדשה (HH:MM):", "");
-      if (newTime === null || !/^[0-2]\d:\d{2}$/.test(newTime)) return;
-      try {
-        await postJSON(`/admin/slots/update`, { slot_id: slotId, time_label: newTime });
-        location.reload();
-      } catch (err) { alert(err.message || "Failed"); }
       return;
     }
 
