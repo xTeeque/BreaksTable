@@ -6,13 +6,51 @@
   <title>דשבורד</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body data-role="<%= user?.role || 'user' %>">
+<body data-role="<%= (typeof user !== 'undefined' && user && user.role) ? user.role : 'user' %>">
+  <%
+    // בטיחות נגד undefined
+    const U = (typeof user !== 'undefined' && user) ? user : {};
+    const SLOTS = Array.isArray(slots) ? slots : [];
+    const CSRF = (typeof csrfToken !== 'undefined' && csrfToken) ? csrfToken : '';
+
+    // שעות מוצגות (התאם כאן במידת הצורך)
+    const HOURS = ["12:50","13:25","14:00","14:35"];
+
+    // קיבוץ לפי שעה
+    const byHour = {};
+    SLOTS.forEach(s => {
+      if (!byHour[s.time_label]) byHour[s.time_label] = [];
+      byHour[s.time_label].push(s);
+    });
+
+    function fourFor(t) {
+      const arr = (byHour[t] || []).slice().sort((a,b) => {
+        if ((a.row_index ?? 0) !== (b.row_index ?? 0)) return (a.row_index ?? 0) - (b.row_index ?? 0);
+        return (a.col_index ?? 0) - (b.col_index ?? 0);
+      });
+      // אם פחות מ-4, משלימים ויזואלית (לא נוגעים בבסיס הנתונים כאן)
+      while (arr.length < 4) arr.push({
+        slot_id: -1,
+        label: '',
+        color: '#e0f2fe',
+        time_label: t,
+        col_index: arr.length+1,
+        row_index: 0,
+        active: false,
+        user_id: null
+      });
+      return arr.slice(0,4);
+    }
+  %>
+
   <div class="card" style="max-width:960px">
-    <div class="topbar">
-      <% if (user && user.role === 'admin') { %>
-        <button id="btn-clear-all" class="badge danger" style="margin-inline-start:8px">ניקוי כללי</button>
-        <form id="add-slot-form" class="inline" method="post" action="/admin/slots/create" style="display:inline-flex; gap:6px; align-items:center; margin-inline-start:8px">
-          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <div class="topbar" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+      <% if (U.role === 'admin') { %>
+        <button id="btn-clear-all" class="badge danger">ניקוי כללי</button>
+
+        <!-- טופס הוספת משבצת (חסין גם אם csrfToken לא הועבר) -->
+        <form id="add-slot-form" class="inline" method="post" action="/admin/slots/create" style="display:inline-flex; gap:6px; align-items:center">
+          <input type="hidden" name="_csrf" value="<%= CSRF %>">
           <input name="label" placeholder="טקסט בתא (לא חובה)" style="width:140px">
           <input name="time_label" placeholder="שעה (HH:MM)" required pattern="^\\d{2}:\\d{2}$" style="width:110px">
           <input name="col_index" placeholder="עמודה (1-4)" type="number" min="1" max="4" required style="width:90px">
@@ -23,80 +61,55 @@
         </form>
       <% } %>
 
-      <h1>שלום <%= (user?.first_name || "") + " " + (user?.last_name || "") %></h1>
+      <h1 style="margin-inline-start:auto">
+        שלום <%= [U.first_name || "", U.last_name || ""].join(" ").trim() %>
+      </h1>
+
       <form method="post" action="/logout">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <input type="hidden" name="_csrf" value="<%= CSRF %>">
         <button type="submit">התנתקות</button>
       </form>
     </div>
+
     <p class="muted">
-      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות. רק משבצת תפוסה נצבעת בירוק.
-      (אדמין: פתיחה/סגירה/ניקוי/עריכת שם/עריכת שעה/מחיקה)
+      כל שורה = שעה מימין + 4 משבצות משמאל. ברירת מחדל: 2 פתוחות + 2 סגורות.
+      משבצת תפוסה נצבעת בירוק. (אדמין: פתיחה/סגירה/ניקוי/עריכת שם/עריכת שעה/מחיקה)
     </p>
 
     <div id="grid" class="grid">
-      <%
-        const HOURS = ["12:50","13:25","14:00","14:35"];
-
-        // קיבוץ לפי שעה
-        const byHour = {};
-        slots.forEach(s => {
-          if (!byHour[s.time_label]) byHour[s.time_label] = [];
-          byHour[s.time_label].push(s);
-        });
-
-        function fourFor(t) {
-          const arr = (byHour[t] || []).slice().sort((a,b) => {
-            if (a.row_index !== b.row_index) return a.row_index - b.row_index;
-            return a.col_index - b.col_index;
-          });
-          // אם אין בדיוק 4, נשלים/נחתוך ויזואלית (הנתונים עצמם נשמרים בבסיס)
-          while (arr.length < 4) arr.push({
-            slot_id: -1,
-            label: '',
-            color: '#e0f2fe',
-            time_label: t,
-            col_index: arr.length+1,
-            row_index: 0,
-            active: false,
-            user_id: null
-          });
-          return arr.slice(0,4);
-        }
-      %>
-
-      <% HOURS.forEach(time => {
-           const cells = fourFor(time);
-      %>
-        <!-- תא שעה מימין -->
+      <% HOURS.forEach(time => { const cells = fourFor(time); %>
+        <!-- תא שעה -->
         <div class="cell time"><%= time %></div>
 
-        <!-- 4 משבצות משמאל -->
+        <!-- ארבע משבצות -->
         <% cells.forEach(s => {
+             const sid = Number(s.slot_id || -1);
              const taken = !!s.user_id;
-             const mine  = s.user_id && user && s.user_id === user.id;
-             const showName = taken || (user && user.role==='admin' && s.label);
-             const bg = taken ? '#86efac' : '#e0f2fe';
-             const disabledForUser = (!s.active || (taken && !mine));
+             const mine  = taken && U.id && (s.user_id === U.id);
+             const active = !!s.active;
+             const showName = taken || (U.role === 'admin' && (s.label || '').trim());
+             const bg = taken ? '#86efac' : (s.color || '#e0f2fe');
+             const disabledForUser = (!active || (taken && !mine));
         %>
           <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
                style="background:<%= bg %>"
-               data-slot-id="<%= s.slot_id %>"
+               data-slot-id="<%= sid %>"
                data-taken="<%= taken ? '1' : '0' %>"
                data-mine="<%= mine ? '1' : '0' %>"
-               data-active="<%= s.active ? '1' : '0' %>">
+               data-active="<%= active ? '1' : '0' %>">
+
             <div class="slot-text"><%= showName ? (s.label || '') : '' %></div>
             <div class="badge">
               <% if (mine) { %>שלך (הסר)
-              <% } else if (!s.active) { %>סגור
+              <% } else if (!active) { %>סגור
               <% } else if (taken) { %>תפוס
               <% } else { %>פנוי<% } %>
             </div>
 
-            <% if (user && user.role==='admin') { %>
+            <% if (U.role === 'admin' && sid > 0) { %>
               <div class="admin-actions">
                 <span class="badge" data-action="clear">נקה</span>
-                <% if (s.active) { %>
+                <% if (active) { %>
                   <span class="badge danger" data-action="close">סגור</span>
                 <% } else { %>
                   <span class="badge success" data-action="open">פתח</span>
@@ -104,7 +117,7 @@
                 <span class="badge info" data-action="label">ערוך שם</span>
                 <span class="badge" data-action="time">ערוך שעה</span>
                 <form class="inline" data-action="delete" style="display:inline">
-                  <input type="hidden" name="slot_id" value="<%= s.slot_id %>">
+                  <input type="hidden" name="slot_id" value="<%= sid %>">
                   <button class="badge danger" type="submit">מחק</button>
                 </form>
               </div>
@@ -115,8 +128,8 @@
     </div>
   </div>
 
-    <script>window.CSRF_TOKEN = "<%= csrfToken %>"</script>
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="/dashboard.js" defer></script>
+  <script>window.CSRF_TOKEN = "<%= CSRF %>"</script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/dashboard.js" defer></script>
 </body>
 </html>
