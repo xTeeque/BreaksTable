@@ -3,20 +3,35 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>קביעת סיסמה חדשה</title>
+  <title>איפוס סיסמה</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body>
+<body class="page-center">
   <div class="card">
-    <h1>סיסמה חדשה</h1>
-    <% if (error) { %><p class="error"><%= error %></p><% } %>
-    <form method="post" action="/reset/<%= token %>">
+    <h1>איפוס סיסמה</h1>
+
+    <% if (typeof error !== 'undefined' && error) { %>
+      <p class="error"><%= error %></p>
+    <% } %>
+
+    <% if (typeof message !== 'undefined' && message) { %>
+      <p class="success"><%= message %></p>
+    <% } %>
+
+    <form method="post" action="/reset/<%= token %>" autocomplete="on">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <div><label>סיסמה</label><br><input name="password" type="password" required minlength="6"></div>
-      <div><label>אישור סיסמה</label><br><input name="confirm" type="password" required minlength="6"></div>
+
+      <div>
+        <label>סיסמה חדשה</label><br>
+        <input name="password" type="password" required minlength="6" autocomplete="new-password">
+      </div>
+
       <button type="submit">עדכן סיסמה</button>
     </form>
-    <p><a href="/login">חזרה להתחברות</a></p>
+
+    <p style="margin-top:10px">
+      <a href="/login">חזרה להתחברות</a>
+    </p>
   </div>
 </body>
 </html>
