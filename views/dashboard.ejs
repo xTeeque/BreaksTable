@@ -12,30 +12,23 @@
     const SLOTS = Array.isArray(slots) ? slots : [];
     const CSRF = (typeof csrfToken !== 'undefined' && csrfToken) ? csrfToken : '';
 
-    // שעות דינמיות מתוך הנתונים
     const HOURS = [...new Set(SLOTS.map(s => s.time_label))].sort((a,b) => String(a).localeCompare(String(b)));
 
     const byHour = {};
-    SLOTS.forEach(s => {
-      if (!byHour[s.time_label]) byHour[s.time_label] = [];
-      byHour[s.time_label].push(s);
-    });
+    SLOTS.forEach(s => { if (!byHour[s.time_label]) byHour[s.time_label] = []; byHour[s.time_label].push(s); });
 
     function fourFor(t) {
       const arr = (byHour[t] || []).slice().sort((a,b) => {
         if ((a.row_index ?? 0) !== (b.row_index ?? 0)) return (a.row_index ?? 0) - (b.row_index ?? 0);
         return (a.col_index ?? 0) - (b.col_index ?? 0);
       });
-      while (arr.length < 4) arr.push({
-        slot_id: -1, label: '', color: '#e0f2fe', time_label: t, col_index: arr.length+1,
-        row_index: 0, active: false, user_id: null, admin_lock: false,
-      });
+      while (arr.length < 4) arr.push({ slot_id: -1, label: '', color: '#e0f2fe', time_label: t, col_index: arr.length+1, row_index: 0, active: false, user_id: null, admin_lock: false });
       return arr.slice(0,4);
     }
   %>
 
   <div class="page">
-    <!-- פס עליון: ימין = שלום; שמאל = כפתורי אדמין + התנתקות -->
+    <!-- פס עליון: ימין = שלום; שמאל = כפתורי אדמין + פרופיל + התנתקות -->
     <div class="card topbar">
       <div class="right">
         <span>שלום, <strong><%= [U.first_name || "", U.last_name || ""].join(" ").trim() %></strong></span>
@@ -47,6 +40,8 @@
           <button id="btn-clear-all" class="badge danger">ניקוי כללי</button>
         <% } %>
 
+        <a class="badge" href="/profile">פרופיל</a>
+
         <form method="post" action="/logout" class="inline">
           <input type="hidden" name="_csrf" value="<%= CSRF %>">
           <button type="submit" class="badge">התנתקות</button>
@@ -55,13 +50,10 @@
     </div>
 
     <div class="card">
-      <p class="muted">
-        משבצת נחשבת <strong>“תפוס”</strong> אם יש הרשמה או אם אדמין נעל אותה עם שם מותאם.
-      </p>
+      <p class="muted">משבצת נחשבת <strong>“תפוס”</strong> אם יש הרשמה או אם אדמין נעל אותה עם שם מותאם.</p>
 
       <div id="grid" class="grid">
         <% HOURS.forEach(time => { const cells = fourFor(time); %>
-          <!-- תא שעה: זמן + כפתורי עריכה/הסרה ממורכזים -->
           <div class="cell time" data-time="<%= time %>">
             <span class="time-text"><%= time %></span>
             <% if (U.role === 'admin') { %>
@@ -72,7 +64,6 @@
             <% } %>
           </div>
 
-          <!-- ארבע משבצות -->
           <% cells.forEach(s => {
                const sid = Number(s.slot_id || -1);
                const hasUser = !!s.user_id;
