@@ -6,31 +6,32 @@
   <title>התחברות</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body class="page-center">
-  <div class="card">
-    <h1>התחברות</h1>
+<body>
+  <div class="page">
+    <div class="card">
+      <h1>התחברות</h1>
 
-    <% if (typeof error !== 'undefined' && error) { %>
-      <p class="error"><%= error %></p>
-    <% } %>
+      <% if (typeof error !== 'undefined' && error) { %>
+        <p class="error"><%= error %></p>
+      <% } %>
 
-    <form method="post" action="/login" autocomplete="on">
-      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-      <div>
-        <label>אימייל</label><br>
-        <input name="email" type="email" required>
-      </div>
-      <div>
-        <label>סיסמה</label><br>
-        <input name="password" type="password" required minlength="6">
-      </div>
-      <button type="submit">התחבר</button>
-    </form>
-
-    <p>
-      <a href="/forgot">שכחתי סיסמה</a> ·
-      <a href="/register">הרשמה</a>
-    </p>
+      <form method="post" action="/login" autocomplete="on">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div>
+          <label>אימייל</label><br>
+          <input name="email" type="email" required>
+        </div>
+        <div>
+          <label>סיסמה</label><br>
+          <input name="password" type="password" required>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+          <button class="badge" type="submit">התחבר</button>
+          <a class="badge" href="/forgot">שכחת סיסמה?</a>
+          <a class="badge" href="/register">משתמש חדש</a>
+        </div>
+      </form>
+    </div>
   </div>
 </body>
 </html>
