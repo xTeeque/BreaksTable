@@ -36,6 +36,7 @@ import {
   deleteSlot,
   createHour,
   renameHour,
+  deleteHour,
 } from "./src/db.js";
 
 import {
@@ -70,7 +71,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(morgan("dev"));
 
-// סטטי — כמו קודם, ישירות מתיקיית public
+// סטטי
 app.use(express.static(path.join(__dirname, "public")));
 
 const PgStore = pgSimpleFactory(session);
@@ -210,6 +211,11 @@ app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async 
 app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const active = !!req.body.active;
+
+  // אם סוגרים — מחיקים קודם את המשתמש (אם יש) ומנקים הטקסט/צבע
+  if (!active) {
+    await clearSlotReservation(slotId);
+  }
   await setSlotActive(slotId, active);
   await broadcastSlots();
   res.json({ ok: true });
@@ -242,7 +248,7 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// שעות: הוספה/שינוי
+// שעות: הוספה/שינוי/מחיקה
 app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, res) => {
   const tl = (req.body.time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
@@ -264,7 +270,15 @@ app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, r
   }
 });
 
-// ✅ ניקוי כללי (לכפתור בטופ-בר)
+app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, res) => {
+  const tl = (req.body.time_label ?? "").toString().trim();
+  if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
+  await deleteHour(tl);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
+// ניקוי כללי (כפתור בטופ־בר)
 app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
   await pool.query(`DELETE FROM reservations;`);
   await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false;`);
