@@ -3,35 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>שחזור סיסמה</title>
+  <title>שכחתי סיסמה</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body class="page-center">
-  <div class="card">
-    <h1>שחזור סיסמה</h1>
+<body>
+  <div class="page">
+    <div class="card">
+      <h1>איפוס סיסמה</h1>
 
-    <% if (typeof error !== 'undefined' && error) { %>
-      <p class="error"><%= error %></p>
-    <% } %>
+      <% if (typeof message !== 'undefined' && message) { %>
+        <p class="muted"><%= message %></p>
+      <% } %>
+      <% if (typeof error !== 'undefined' && error) { %>
+        <p class="error"><%= error %></p>
+      <% } %>
 
-    <% if (typeof message !== 'undefined' && message) { %>
-      <p class="success"><%= message %></p>
-    <% } %>
-
-    <form method="post" action="/forgot" autocomplete="on">
-      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-
-      <div>
-        <label>אימייל</label><br>
-        <input name="email" type="email" required>
-      </div>
-
-      <button type="submit">שלח קישור איפוס</button>
-    </form>
-
-    <p style="margin-top:10px">
-      <a href="/login">חזרה להתחברות</a>
-    </p>
+      <form method="post" action="/forgot" autocomplete="on">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div>
+          <label>האימייל של החשבון</label><br>
+          <input name="email" type="email" required>
+        </div>
+        <div style="margin-top:10px">
+          <button class="badge" type="submit">שלח קישור איפוס</button>
+          <a class="badge" href="/login" style="margin-inline-start:6px">חזרה להתחברות</a>
+        </div>
+      </form>
+    </div>
   </div>
 </body>
 </html>
