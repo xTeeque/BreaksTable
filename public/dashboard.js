@@ -49,7 +49,20 @@ if (btnAddHour) {
 const grid = document.getElementById("grid");
 if (grid) {
   grid.addEventListener("click", async (e) => {
-    // עריכת שעה ע"י אדמין: לחיצה על תא השעה הימני
+    // מחיקת שעה שלמה
+    const delHourBtn = e.target.closest("[data-action='delete-hour']");
+    if (isAdmin && delHourBtn) {
+      const time = delHourBtn.getAttribute("data-time") || delHourBtn.closest(".cell.time")?.getAttribute("data-time");
+      if (!time) return;
+      if (!confirm(`להסיר את כל המשבצות של השעה ${time}?`)) return;
+      try {
+        await postJSON("/admin/hours/delete", { time_label: time });
+        location.reload();
+      } catch (err) { alert(err.message || "Delete hour failed"); }
+      return;
+    }
+
+    // עריכת שעה ע"י אדמין: לחיצה על תא השעה עצמו
     const timeCell = e.target.closest(".cell.time");
     if (isAdmin && timeCell) {
       const from = timeCell.getAttribute("data-time") || timeCell.textContent.trim();
@@ -82,6 +95,7 @@ if (grid) {
       return;
     }
     if (isAdmin && e.target.closest("[data-action='close']")) {
+      // הצד שרת כבר מנקה משתמש אם קיים ואז סוגר
       try { await postJSON(`/admin/slots/${slotId}/active`, { active: false }); location.reload(); } catch (err) { alert(err.message); }
       return;
     }
@@ -102,19 +116,6 @@ if (grid) {
     } catch (err) {
       alert(err.message || "Action failed");
     }
-  });
-
-  // מחיקת משבצת (טופסי מחיקה)
-  qsa('form[data-action="delete"]').forEach((form) => {
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const slotId = Number(form.querySelector('[name="slot_id"]').value);
-      if (!confirm("למחוק את המשבצת?")) return;
-      try {
-        await postJSON(`/admin/slots/delete`, { slot_id: slotId });
-        location.reload();
-      } catch (err) { alert(err.message || "Delete failed"); }
-    });
   });
 }
 
