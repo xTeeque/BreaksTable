@@ -35,17 +35,8 @@
   <div class="card" style="max-width:960px">
     <div class="topbar" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
       <% if (U.role === 'admin') { %>
+        <button id="btn-add-hour" class="badge">הוסף שעה</button>
         <button id="btn-clear-all" class="badge danger">ניקוי כללי</button>
-        <form id="add-slot-form" class="inline" method="post" action="/admin/slots/create" style="display:inline-flex; gap:6px; align-items:center">
-          <input type="hidden" name="_csrf" value="<%= CSRF %>">
-          <input name="label" placeholder="טקסט בתא (לא חובה)" style="width:140px">
-          <input name="time_label" placeholder="שעה (HH:MM)" required pattern="^\\d{2}:\\d{2}$" style="width:110px">
-          <input name="col_index" placeholder="עמודה (1-4)" type="number" min="1" max="4" required style="width:90px">
-          <input name="row_index" placeholder="שורה" type="number" min="0" required style="width:80px">
-          <input type="hidden" name="color" value="#e0f2fe">
-          <input type="hidden" name="active" value="true">
-          <button class="badge" type="submit">הוסף משבצת</button>
-        </form>
       <% } %>
 
       <h1 style="margin-inline-start:auto">
@@ -54,7 +45,7 @@
 
       <form method="post" action="/logout">
         <input type="hidden" name="_csrf" value="<%= CSRF %>">
-        <button type="submit">התנתקות</button>
+        <button type="submit" class="badge">התנתקות</button>
       </form>
     </div>
 
@@ -64,16 +55,23 @@
 
     <div id="grid" class="grid">
       <% HOURS.forEach(time => { const cells = fourFor(time); %>
-        <div class="cell time"><%= time %></div>
+        <!-- תא שעה (לחיץ לאדמין לעריכת השעה) -->
+        <div class="cell time" data-time="<%= time %>">
+          <span class="time-text"><%= time %></span>
+          <% if (U.role === 'admin') { %>
+            <span class="muted" style="font-size:12px; margin-inline-start:6px">[ערוך]</span>
+          <% } %>
+        </div>
 
+        <!-- ארבע משבצות -->
         <% cells.forEach(s => {
              const sid = Number(s.slot_id || -1);
              const hasUser = !!s.user_id;
              const adminLocked = !!s.admin_lock;
-             const taken = hasUser || adminLocked;        // ← תפוס גם אם admin_lock=true
+             const taken = hasUser || adminLocked;
              const mine  = hasUser && U.id && (s.user_id === U.id);
              const active = !!s.active;
-             const showName = taken ? (s.label || '') : ''; // בשם אדמין או משתמש
+             const showName = taken ? (s.label || '') : '';
              const bg = taken ? '#86efac' : (s.color || '#e0f2fe');
              const disabledForUser = (!active || (taken && !mine));
         %>
@@ -94,14 +92,13 @@
 
             <% if (U.role === 'admin' && sid > 0) { %>
               <div class="admin-actions">
-                <span class="badge" data-action="clear">נקה</span>
+                <button class="badge" type="button" data-action="clear">נקה</button>
                 <% if (active) { %>
-                  <span class="badge danger" data-action="close">סגור</span>
+                  <button class="badge danger" type="button" data-action="close">סגור</button>
                 <% } else { %>
-                  <span class="badge success" data-action="open">פתח</span>
+                  <button class="badge success" type="button" data-action="open">פתח</button>
                 <% } %>
-                <span class="badge info" data-action="label">ערוך שם</span>
-                <span class="badge" data-action="time">ערוך שעה</span>
+                <button class="badge info" type="button" data-action="label">ערוך שם</button>
                 <form class="inline" data-action="delete" style="display:inline">
                   <input type="hidden" name="slot_id" value="<%= sid %>">
                   <button class="badge danger" type="submit">מחק</button>
