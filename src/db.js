@@ -9,13 +9,12 @@ export const pool = new Pool({
 /* ---------------- Schema init & migrations ---------------- */
 
 async function migrateSlotsSchema() {
-  // בסיס טבלת slots (כולל admin_lock)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS slots (
       id SERIAL PRIMARY KEY,
       label TEXT DEFAULT '',
       color TEXT DEFAULT '#e0f2fe',
-      time_label TEXT,            -- ייתכן שב-DB שלך מוגדר NOT NULL; אנחנו לא נכניס לעולם NULL
+      time_label TEXT,
       col_index INT,
       row_index INT,
       active BOOLEAN DEFAULT TRUE,
@@ -30,10 +29,7 @@ async function migrateSlotsSchema() {
     );
   `);
 
-  // ודא שקיימת עמודת admin_lock גם בסכמות ישנות
   await pool.query(`ALTER TABLE slots ADD COLUMN IF NOT EXISTS admin_lock BOOLEAN NOT NULL DEFAULT FALSE;`);
-
-  // אינדקסים שימושיים
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_slots_time ON slots(time_label)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_slots_row_col ON slots(row_index, col_index)`);
 }
@@ -125,7 +121,6 @@ export async function getSlotsWithReservations() {
   return rows;
 }
 
-/** אתחול ראשוני אם אין משבצות בכלל */
 export async function seedSlotsIfEmpty() {
   const { rows } = await pool.query(`SELECT COUNT(*)::int AS c FROM slots`);
   if (rows[0].c > 0) return;
@@ -137,25 +132,17 @@ export async function seedSlotsIfEmpty() {
       await pool.query(
         `INSERT INTO slots (label, color, time_label, col_index, row_index, active, admin_lock)
          VALUES ('', '#e0f2fe', $1, $2, $3, $4, false)`,
-        [t, col, rowIndex, col <= 2] // שתיים ראשונות פתוחות
+        [t, col, rowIndex, col <= 2]
       );
     }
     rowIndex++;
   }
 }
 
-/**
- * דואג שתמיד יהיו בדיוק 4 משבצות לשעה נתונה.
- * הערה חשובה: timeLabel חייב להיות מחרוזת לא-ריקה.
- */
 export async function normalizeSlotsToFour(timeLabel) {
   const tl = (timeLabel ?? "").toString().trim();
-  if (!tl) {
-    // הגנה: לא להכניס לעולם NULL/ריק ל-time_label
-    throw new Error("normalizeSlotsToFour: timeLabel is required (non-empty)");
-  }
+  if (!tl) throw new Error("normalizeSlotsToFour: timeLabel is required (non-empty)");
 
-  // 1) מחק כפילויות (שמור את ה-id הנמוך לכל (time_label,col_index))
   await pool.query(`
     WITH keep AS (
       SELECT MIN(id) AS keep_id, time_label, col_index
@@ -170,7 +157,6 @@ export async function normalizeSlotsToFour(timeLabel) {
       AND s.id <> k.keep_id
   `, [tl]);
 
-  // 2) צור חסרות כך שתמיד יהיו col_index 1..4
   const { rows: rIdx } = await pool.query(
     `SELECT COALESCE(MIN(row_index), 1)::int AS row_index FROM slots WHERE time_label=$1`,
     [tl]
@@ -191,22 +177,18 @@ export async function normalizeSlotsToFour(timeLabel) {
     }
   }
 
-  // 3) מחק עמודות לא חוקיות
   await pool.query(
     `DELETE FROM slots WHERE time_label=$1 AND (col_index < 1 OR col_index > 4)`,
     [tl]
   );
 
-  // 4) קבע row_index קבוע לשעה
   await pool.query(`UPDATE slots SET row_index=$2 WHERE time_label=$1`, [tl, rowIndex]);
 
-  // 5) שתי הראשונות פתוחות, שתיים סגורות
   await pool.query(
     `UPDATE slots SET active = CASE WHEN col_index IN (1,2) THEN TRUE ELSE FALSE END WHERE time_label=$1`,
     [tl]
   );
 
-  // 6) איפוס צבע/טקסט/נעילה למשבצות שאינן תפוסות
   await pool.query(`
     UPDATE slots s
     SET color = '#e0f2fe',
@@ -257,15 +239,47 @@ export async function deleteSlot(slotId) {
 
 export async function clearUserReservation(userId) {
   const { rows } = await pool.query(`DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`, [userId]);
-  const slotId = rows[0]?.slot_id;
-  if (slotId) {
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false WHERE id=$1`, [slotId]);
+  const prevSlot = rows[0]?.slot_id;
+  if (prevSlot) {
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false WHERE id=$1`, [prevSlot]);
   }
 }
 
 export async function clearSlotReservation(slotId) {
   await pool.query(`DELETE FROM reservations WHERE slot_id=$1`, [slotId]);
   await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false WHERE id=$1`, [slotId]);
+}
+
+/** יצירת שעה חדשה (4 משבצות) */
+export async function createHour(time_label) {
+  const tl = (time_label ?? "").toString().trim();
+  if (!/^[0-2]\d:\d{2}$/.test(tl)) throw new Error("createHour: time_label format HH:MM required");
+
+  const { rows: exists } = await pool.query(`SELECT 1 FROM slots WHERE time_label=$1 LIMIT 1`, [tl]);
+  if (exists.length) throw new Error("שעה זו כבר קיימת");
+
+  const { rows: r } = await pool.query(`SELECT COALESCE(MAX(row_index),0)::int + 1 AS next_row FROM slots`);
+  const rowIndex = r[0]?.next_row ?? 1;
+
+  for (let col = 1; col <= 4; col++) {
+    await pool.query(
+      `INSERT INTO slots (label, color, time_label, col_index, row_index, active, admin_lock)
+       VALUES ('', '#e0f2fe', $1, $2, $3, $4, false)`,
+      [tl, col, rowIndex, col <= 2]
+    );
+  }
+}
+
+/** שינוי זמן לשעה קיימת — רק אם היעד עוד לא קיים */
+export async function renameHour(from, to) {
+  const src = (from ?? "").toString().trim();
+  const dst = (to ?? "").toString().trim();
+  if (!/^[0-2]\d:\d{2}$/.test(src) || !/^[0-2]\d:\d{2}$/.test(dst)) {
+    throw new Error("renameHour: HH:MM required");
+  }
+  const { rows: exists } = await pool.query(`SELECT 1 FROM slots WHERE time_label=$1 LIMIT 1`, [dst]);
+  if (exists.length) throw new Error("כבר קיימת שעה עם הערך החדש");
+  await pool.query(`UPDATE slots SET time_label=$2 WHERE time_label=$1`, [src, dst]);
 }
 
 export async function reserveSlot(userId, slotId) {
@@ -287,7 +301,18 @@ export async function reserveSlot(userId, slotId) {
       throw new Error("המשבצת תפוסה ע\"י אדמין");
     }
 
-    await client.query(`DELETE FROM reservations WHERE user_id=$1`, [userId]);
+    // ✅ נקה הרשמה קודמת של המשתמש והחזר את המשבצת הקודמת לצבע ניטרלי
+    const { rows: prev } = await client.query(
+      `DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`,
+      [userId]
+    );
+    const prevSlotId = prev[0]?.slot_id;
+    if (prevSlotId) {
+      await client.query(
+        `UPDATE slots SET label='', color='#e0f2fe', admin_lock=false WHERE id=$1`,
+        [prevSlotId]
+      );
+    }
 
     const ins = await client.query(
       `INSERT INTO reservations (slot_id, user_id)
