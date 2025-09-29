@@ -58,19 +58,16 @@ const io = new SocketIOServer(httpServer, {
   cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-// שידור עדכון ל־Socket.IO אחרי כל שינוי רלוונטי
 async function broadcastSlots() {
   try { io.emit("slots:update", { at: Date.now() }); } catch (e) { console.error("broadcast error:", e); }
 }
 
-// אבטחה/סטטיק/לוגים/JSON
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(morgan("dev"));
 app.use(express.static(path.join(__dirname, "public")));
 
-// סשן
 const PgStore = pgSimpleFactory(session);
 app.use(session({
   store: new PgStore({ pool, tableName: "session", createTableIfMissing: true }),
@@ -78,47 +75,29 @@ app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
   resave: false,
   saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: !!process.env.COOKIE_SECURE,
-    maxAge: 1000 * 60 * 60 * 24 * 14,
-  },
+  cookie: { httpOnly: true, sameSite: "lax", secure: !!process.env.COOKIE_SECURE, maxAge: 1000*60*60*24*14 },
 }));
 
-// CSRF גלובלי (GET יוצר טוקן; בדיקה רק לבקשות משנות־מצב)
 const csrfProtection = csrf();
 app.use(csrfProtection);
 
-// Rate limit
 const limiter = rateLimit({ windowMs: 60_000, max: 300 });
 app.use(limiter);
 
-// תצוגות
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
-/* ------------------ עמודים ------------------ */
+/* ------------------ Pages ------------------ */
 
-// דשבורד (ראוט הבית)
 app.get("/", requireAuth, async (req, res, next) => {
   try {
     const slots = await getSlotsWithReservations();
-    res.render("dashboard", {
-      slots,
-      user: req.session.user,
-      csrfToken: req.csrfToken(),
-    });
+    res.render("dashboard", { slots, user: req.session.user, csrfToken: req.csrfToken() });
   } catch (e) { next(e); }
 });
-
-// ✅ הוספנו ראוט ל־/dashboard כדי למנוע 404
 app.get("/dashboard", requireAuth, (req, res) => res.redirect("/"));
 
-// התחברות/התנתקות/הרשמה
-app.get("/login", (req, res) => {
-  res.render("login", { csrfToken: req.csrfToken() });
-});
+app.get("/login", (req, res) => res.render("login", { csrfToken: req.csrfToken() }));
 
 app.post("/login",
   body("email").isEmail(),
@@ -134,24 +113,14 @@ app.post("/login",
     const ok = await bcrypt.compare(String(req.body.password), user.password_hash);
     if (!ok) return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "Wrong password" });
 
-    req.session.user = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      first_name: user.first_name,
-      last_name: user.last_name,
-    };
+    req.session.user = { id: user.id, email: user.email, role: user.role, first_name: user.first_name, last_name: user.last_name };
     res.redirect("/");
   }
 );
 
-app.post("/logout", (req, res) => {
-  req.session.destroy(() => res.redirect("/login"));
-});
+app.post("/logout", (req, res) => { req.session.destroy(() => res.redirect("/login")); });
 
-app.get("/register", (req, res) => {
-  res.render("register", { csrfToken: req.csrfToken() });
-});
+app.get("/register", (req, res) => res.render("register", { csrfToken: req.csrfToken() }));
 
 app.post("/register",
   body("email").isEmail(),
@@ -160,9 +129,7 @@ app.post("/register",
   body("last_name").optional().isString(),
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).render("register", { csrfToken: req.csrfToken(), error: "Invalid payload" });
-    }
+    if (!errors.isEmpty()) return res.status(400).render("register", { csrfToken: req.csrfToken(), error: "Invalid payload" });
 
     const email = safeLower(req.body.email);
     const passHash = await bcrypt.hash(String(req.body.password), 10);
@@ -179,16 +146,12 @@ app.post("/register",
   }
 );
 
-/* ------------------ Reset password ------------------ */
-app.get("/forgot", (req, res) => {
-  res.render("forgot", { csrfToken: req.csrfToken() });
-});
+app.get("/forgot", (req, res) => res.render("forgot", { csrfToken: req.csrfToken() }));
 
 app.post("/forgot", body("email").isEmail(), async (req, res, next) => {
   try {
     const email = safeLower(req.body.email);
     const user = await userByEmail(email);
-    // תמיד מחזירים OK כדי לא לחשוף קיום משתמש
     const token = nanoid(32);
     if (user) {
       await insertReset({ user_id: user.id, token, expires_at: dayjs().add(1, "hour").toISOString() });
@@ -212,7 +175,7 @@ app.post("/reset/:token", body("password").isString().isLength({ min: 6 }), asyn
   res.redirect("/login");
 });
 
-/* ------------------ פעולות משתמש ------------------ */
+/* ------------------ User actions ------------------ */
 
 app.post("/reserve/:slotId", requireAuth, async (req, res) => {
   try {
@@ -231,7 +194,7 @@ app.post("/unreserve", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-/* ------------------ פעולות אדמין ------------------ */
+/* ------------------ Admin actions ------------------ */
 
 app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
   await clearSlotReservation(Number(req.params.slotId));
@@ -247,16 +210,23 @@ app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async
   res.json({ ok: true });
 });
 
+// ✅ שינוי שם ע"י אדמין: מסיר משתמש קודם, נועל את התא, מציג שם שנבחר וצביעה ירוקה
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
-  await clearSlotReservation(slotId);
-  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e5e7eb" });
+
+  await clearSlotReservation(slotId); // מסיר כל הרשמה קיימת
+  await updateSlot(slotId, {
+    label,
+    color: label ? "#86efac" : "#e0f2fe",
+    admin_lock: !!label,             // אם יש שם — נועל ע"י אדמין => נחשב "תפוס" לכולם
+  });
+
   await broadcastSlots();
   return res.json({ ok: true });
 });
 
-// עדכון (כולל שינוי שעה)
+// עדכון כללי (כולל שינוי שעה)
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     slot_id: Number(req.body.slot_id),
@@ -265,17 +235,17 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
     time_label: nullableTrim(req.body.time_label),
     col_index: req.body.col_index != null ? Number(req.body.col_index) : undefined,
     row_index: req.body.row_index != null ? Number(req.body.row_index) : undefined,
+    // בכוונה לא נוגעים כאן ב-admin_lock, רק בראוט ה-label
   };
   await updateSlot(payload.slot_id, payload);
   await broadcastSlots();
   res.json({ ok: true });
 });
 
-// יצירה/מחיקה
 app.post("/admin/slots/create", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     label: nullableTrim(req.body.label) || "",
-    color: nullableTrim(req.body.color) || "#e5e7eb",
+    color: nullableTrim(req.body.color) || "#e0f2fe",
     time_label: String(req.body.time_label),
     col_index: Number(req.body.col_index),
     row_index: Number(req.body.row_index),
@@ -293,11 +263,11 @@ app.post("/admin/slots/delete", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// ניקוי יומי (אופציונלי)
+/* ------------------ Daily (optional) ------------------ */
 cron.schedule("0 15 * * *", async () => {
   try {
     await pool.query(`DELETE FROM reservations;`);
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe';`);
+    await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false;`);
     await broadcastSlots();
     console.log("Daily clear-all executed (15:00 Asia/Jerusalem)");
   } catch (e) {
@@ -305,9 +275,8 @@ cron.schedule("0 15 * * *", async () => {
   }
 }, { timezone: "Asia/Jerusalem" });
 
-/* ------------------ מטפלי שגיאות ו־404 ------------------ */
+/* ------------------ Errors & 404 ------------------ */
 
-// טיפול ב־CSRF ושאר שגיאות (לא חושף stack בפרודקשן)
 app.use((err, req, res, next) => {
   if (err && err.code === "EBADCSRFTOKEN") {
     return res.status(403).send("Invalid CSRF token");
@@ -317,10 +286,8 @@ app.use((err, req, res, next) => {
   res.status(500).send("Server error");
 });
 
-// 404 אחרון (אחרי כל הראוטים)
 app.use((req, res) => res.status(404).send("Not Found"));
 
-// Start
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
