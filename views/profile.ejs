@@ -34,8 +34,8 @@
       <form method="post" action="/profile">
         <input type="hidden" name="_csrf" value="<%= csrfToken %>">
         <div>
-          <label>טלפון (E.164, לדוגמה +9725XXXXXXXX)</label><br>
-          <input name="phone" type="tel" placeholder="+9725XXXXXXXX" value="<%= user?.phone || '' %>">
+          <label>טלפון (הקלד בלי ‎+972, לדוגמה: 0521234567)</label><br>
+          <input name="phone" type="tel" placeholder="0521234567" value="<%= user?.phone_local || '' %>">
         </div>
         <div style="margin-top:10px">
           <button class="badge" type="submit">שמור</button>
