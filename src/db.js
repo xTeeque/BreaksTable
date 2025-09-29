@@ -121,6 +121,7 @@ export async function getSlotsWithReservations() {
   return rows;
 }
 
+/** אתחול ראשוני אם אין משבצות בכלל */
 export async function seedSlotsIfEmpty() {
   const { rows } = await pool.query(`SELECT COUNT(*)::int AS c FROM slots`);
   if (rows[0].c > 0) return;
@@ -139,6 +140,7 @@ export async function seedSlotsIfEmpty() {
   }
 }
 
+/** שמירה על 4 משבצות לשעה (לפי הצורך – לא חובה לזמן זה) */
 export async function normalizeSlotsToFour(timeLabel) {
   const tl = (timeLabel ?? "").toString().trim();
   if (!tl) throw new Error("normalizeSlotsToFour: timeLabel is required (non-empty)");
@@ -282,6 +284,28 @@ export async function renameHour(from, to) {
   await pool.query(`UPDATE slots SET time_label=$2 WHERE time_label=$1`, [src, dst]);
 }
 
+/** מחיקת שעה שלמה (כולל כל המשבצות וההרשמות שלה) */
+export async function deleteHour(time_label) {
+  const tl = (time_label ?? "").toString().trim();
+  if (!/^[0-2]\d:\d{2}$/.test(tl)) throw new Error("deleteHour: HH:MM required");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `DELETE FROM reservations WHERE slot_id IN (SELECT id FROM slots WHERE time_label=$1)`,
+      [tl]
+    );
+    await client.query(`DELETE FROM slots WHERE time_label=$1`, [tl]);
+    await client.query("COMMIT");
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 export async function reserveSlot(userId, slotId) {
   const client = await pool.connect();
   try {
@@ -301,7 +325,7 @@ export async function reserveSlot(userId, slotId) {
       throw new Error("המשבצת תפוסה ע\"י אדמין");
     }
 
-    // ✅ נקה הרשמה קודמת של המשתמש והחזר את המשבצת הקודמת לצבע ניטרלי
+    // נקה הרשמה קודמת והחזר צבע נייטרלי למשבצת הקודמת
     const { rows: prev } = await client.query(
       `DELETE FROM reservations WHERE user_id=$1 RETURNING slot_id`,
       [userId]
