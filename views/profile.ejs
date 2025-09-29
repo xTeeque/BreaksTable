@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>פרופיל</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="page">
+    <div class="card topbar">
+      <div class="right">
+        <span>שלום, <strong><%= [user?.first_name || "", user?.last_name || ""].join(" ").trim() %></strong></span>
+      </div>
+      <div class="left">
+        <a class="badge" href="/">חזרה לדשבורד</a>
+        <form method="post" action="/logout" class="inline" style="margin-inline-start:8px">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button type="submit" class="badge">התנתקות</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>עדכון טלפון</h2>
+
+      <% if (typeof message !== 'undefined' && message) { %>
+        <p class="muted"><%= message %></p>
+      <% } %>
+      <% if (typeof error !== 'undefined' && error) { %>
+        <p class="error"><%= error %></p>
+      <% } %>
+
+      <form method="post" action="/profile">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <div>
+          <label>טלפון (E.164, לדוגמה +9725XXXXXXXX)</label><br>
+          <input name="phone" type="tel" placeholder="+9725XXXXXXXX" value="<%= user?.phone || '' %>">
+        </div>
+        <div style="margin-top:10px">
+          <button class="badge" type="submit">שמור</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
