@@ -31,8 +31,6 @@ import {
   clearSlotReservation,
   setSlotActive,
   updateSlot,
-  createSlot,
-  deleteSlot,
   createHour,
   renameHour,
   deleteHour,
@@ -55,12 +53,50 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 const httpServer = httpPkg.createServer(app);
-const io = new SocketIOServer(httpServer, {
-  cors: { origin: "*", methods: ["GET", "POST"] },
-});
+const io = new SocketIOServer(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
 async function broadcastSlots() {
   try { io.emit("slots:update", { at: Date.now() }); } catch (e) { console.error("broadcast error:", e); }
+}
+
+// ---------- Normalization helpers ----------
+function normalizeILPhone(input) {
+  if (input == null) return null;
+  let s = String(input).trim();
+  if (s === "") return null;
+
+  // השאר רק ספרות ו"+" בתחילה (אם יש)
+  s = s.replace(/[^\d+]/g, "");
+
+  // כבר בפורמט בינלאומי
+  if (s.startsWith("+")) {
+    if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
+    return s;
+  }
+
+  // מתחיל ב-972 ללא פלוס
+  if (s.startsWith("972")) {
+    s = "+" + s;
+    if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
+    return s;
+  }
+
+  // פורמט מקומי: 05XXXXXXXX או 5XXXXXXXX או 0X...
+  // הסר אפסים מובילים בודדים
+  s = s.replace(/^0+/, "");
+  // הוסף קידומת ישראל
+  s = "+972" + s;
+
+  if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
+  return s;
+}
+
+function e164ToLocalIL(e164) {
+  if (!e164) return "";
+  let s = String(e164).replace(/[^\d]/g, "");
+  if (s.startsWith("972")) s = "0" + s.slice(3);
+  else if (!s.startsWith("0") && /^\d+$/.test(s)) s = "0" + s; // שמרני: אם חסר 0, הוסף
+  return s;
 }
 
 // אבטחה/פרסרים/לוגים
@@ -117,7 +153,10 @@ app.post("/login",
     const ok = await bcrypt.compare(String(req.body.password), user.password_hash);
     if (!ok) return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "Wrong password" });
 
-    req.session.user = { id: user.id, email: user.email, role: user.role, first_name: user.first_name, last_name: user.last_name, phone: user.phone };
+    req.session.user = {
+      id: user.id, email: user.email, role: user.role,
+      first_name: user.first_name, last_name: user.last_name, phone: user.phone
+    };
     res.redirect("/");
   }
 );
@@ -131,7 +170,7 @@ app.post("/register",
   body("password").isString().isLength({ min: 6 }),
   body("first_name").optional().isString(),
   body("last_name").optional().isString(),
-  body("phone").optional().matches(/^\+\d{8,15}$/).withMessage("טלפון חייב להיות בפורמט E.164 (למשל +9725XXXXXXXX)"),
+  body("phone").optional().isString(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -143,7 +182,14 @@ app.post("/register",
     const passHash = await bcrypt.hash(String(req.body.password), 10);
     const first = safeString(req.body.first_name);
     const last  = safeString(req.body.last_name);
-    const phone = safeString(req.body.phone);
+
+    // נירמול טלפון: קלט חופשי -> E.164 (או null אם ריק)
+    let phone = safeString(req.body.phone);
+    try {
+      phone = phone ? normalizeILPhone(phone) : null;
+    } catch (e) {
+      return res.status(400).render("register", { csrfToken: req.csrfToken(), error: e.message || "מספר טלפון לא תקין" });
+    }
 
     try {
       await insertUser({ email, password_hash: passHash, first_name: first, last_name: last, phone });
@@ -157,24 +203,37 @@ app.post("/register",
 
 /* ---- Profile: עדכון טלפון למשתמשים קיימים ---- */
 app.get("/profile", requireAuth, (req, res) => {
-  res.render("profile", { csrfToken: req.csrfToken(), user: req.session.user });
+  const user = { ...req.session.user };
+  // הצג פורמט מקומי בשדה הקלט
+  user.phone_local = e164ToLocalIL(user.phone);
+  res.render("profile", { csrfToken: req.csrfToken(), user });
 });
 
 app.post("/profile",
   requireAuth,
-  body("phone").optional().matches(/^\+\d{8,15}$/).withMessage("טלפון חייב להיות בפורמט E.164 (למשל +9725XXXXXXXX)"),
+  body("phone").optional().isString(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       const msg = errors.array()[0]?.msg || "Invalid payload";
-      return res.status(400).render("profile", { csrfToken: req.csrfToken(), user: req.session.user, error: msg });
+      const user = { ...req.session.user, phone_local: e164ToLocalIL(req.session.user.phone) };
+      return res.status(400).render("profile", { csrfToken: req.csrfToken(), user, error: msg });
     }
 
-    const phone = safeString(req.body.phone);
-    await updateUserPhone(req.session.user.id, phone || null);
-    // עדכן בסשן כדי שיוצג במסכים
-    req.session.user.phone = phone || null;
-    res.render("profile", { csrfToken: req.csrfToken(), user: req.session.user, message: "עודכן בהצלחה" });
+    // נירמול הטלפון מהקלט החופשי
+    const raw = safeString(req.body.phone);
+    let normalized = null;
+    try {
+      normalized = raw ? normalizeILPhone(raw) : null;
+    } catch (e) {
+      const user = { ...req.session.user, phone_local: raw };
+      return res.status(400).render("profile", { csrfToken: req.csrfToken(), user, error: e.message || "מספר טלפון לא תקין" });
+    }
+
+    await updateUserPhone(req.session.user.id, normalized);
+    req.session.user.phone = normalized;
+    const user = { ...req.session.user, phone_local: e164ToLocalIL(normalized) };
+    res.render("profile", { csrfToken: req.csrfToken(), user, message: "עודכן בהצלחה" });
   }
 );
 
@@ -275,16 +334,7 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// ניקוי כללי (כפתור בטופ־בר)
-app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res) => {
-  await pool.query(`DELETE FROM reservations;`);
-  await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false;`);
-  await broadcastSlots();
-  res.json({ ok: true });
-});
-
-/* ------------------ Errors & 404 ------------------ */
-
+// 404 וכו'
 app.use((err, req, res, next) => {
   if (err && err.code === "EBADCSRFTOKEN") {
     return res.status(403).send("Invalid CSRF token");
