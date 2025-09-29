@@ -62,7 +62,21 @@ if (grid) {
       return;
     }
 
-    // עריכת שעה ע"י אדמין: לחיצה על תא השעה עצמו
+    // עריכת שעה — כפתור ייעודי
+    const renameHourBtn = e.target.closest("[data-action='rename-hour']");
+    if (isAdmin && renameHourBtn) {
+      const from = renameHourBtn.getAttribute("data-time") || renameHourBtn.closest(".cell.time")?.getAttribute("data-time");
+      const to = prompt(`ערוך שעה (HH:MM)\nנוכחי: ${from}`, from);
+      if (to === null || to === from) return;
+      if (!/^[0-2]\d:\d{2}$/.test(to)) { alert("פורמט שעה לא תקין (HH:MM)"); return; }
+      try {
+        await postJSON("/admin/hours/rename", { from, to });
+        location.reload();
+      } catch (err) { alert(err.message || "Rename hour failed"); }
+      return;
+    }
+
+    // עריכת שעה — עדיין אפשר גם בלחיצה על תא השעה (נשמרת תאימות)
     const timeCell = e.target.closest(".cell.time");
     if (isAdmin && timeCell) {
       const from = timeCell.getAttribute("data-time") || timeCell.textContent.trim();
@@ -95,7 +109,7 @@ if (grid) {
       return;
     }
     if (isAdmin && e.target.closest("[data-action='close']")) {
-      // הצד שרת כבר מנקה משתמש אם קיים ואז סוגר
+      // השרת מנקה משתמש אם קיים ואז סוגר
       try { await postJSON(`/admin/slots/${slotId}/active`, { active: false }); location.reload(); } catch (err) { alert(err.message); }
       return;
     }
