@@ -16,7 +16,6 @@ import httpPkg from "http";
 import { Server as SocketIOServer } from "socket.io";
 import crypto from "crypto";
 import "dayjs/locale/he.js";
-import cron from "node-cron";
 
 import {
   pool,
@@ -37,6 +36,7 @@ import {
   createHour,
   renameHour,
   deleteHour,
+  updateUserPhone,
 } from "./src/db.js";
 
 import {
@@ -48,8 +48,6 @@ import {
 } from "./src/middleware/auth.js";
 
 import { sendPasswordReset } from "./src/mailer.js";
-
-dayjs.locale("he");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -119,7 +117,7 @@ app.post("/login",
     const ok = await bcrypt.compare(String(req.body.password), user.password_hash);
     if (!ok) return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "Wrong password" });
 
-    req.session.user = { id: user.id, email: user.email, role: user.role, first_name: user.first_name, last_name: user.last_name };
+    req.session.user = { id: user.id, email: user.email, role: user.role, first_name: user.first_name, last_name: user.last_name, phone: user.phone };
     res.redirect("/");
   }
 );
@@ -133,17 +131,22 @@ app.post("/register",
   body("password").isString().isLength({ min: 6 }),
   body("first_name").optional().isString(),
   body("last_name").optional().isString(),
+  body("phone").optional().matches(/^\+\d{8,15}$/).withMessage("טלפון חייב להיות בפורמט E.164 (למשל +9725XXXXXXXX)"),
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).render("register", { csrfToken: req.csrfToken(), error: "Invalid payload" });
+    if (!errors.isEmpty()) {
+      const msg = errors.array()[0]?.msg || "Invalid payload";
+      return res.status(400).render("register", { csrfToken: req.csrfToken(), error: msg });
+    }
 
     const email = safeLower(req.body.email);
     const passHash = await bcrypt.hash(String(req.body.password), 10);
     const first = safeString(req.body.first_name);
-    const last = safeString(req.body.last_name);
+    const last  = safeString(req.body.last_name);
+    const phone = safeString(req.body.phone);
 
     try {
-      await insertUser({ email, password_hash: passHash, first_name: first, last_name: last });
+      await insertUser({ email, password_hash: passHash, first_name: first, last_name: last, phone });
       res.redirect("/login");
     } catch (e) {
       console.error(e);
@@ -152,34 +155,28 @@ app.post("/register",
   }
 );
 
-app.get("/forgot", (req, res) => res.render("forgot", { csrfToken: req.csrfToken() }));
+/* ---- Profile: עדכון טלפון למשתמשים קיימים ---- */
+app.get("/profile", requireAuth, (req, res) => {
+  res.render("profile", { csrfToken: req.csrfToken(), user: req.session.user });
+});
 
-app.post("/forgot", body("email").isEmail(), async (req, res, next) => {
-  try {
-    const email = safeLower(req.body.email);
-    const user = await userByEmail(email);
-    const token = nanoid(32);
-    if (user) {
-      await insertReset({ user_id: user.id, token, expires_at: dayjs().add(1, "hour").toISOString() });
-      await sendPasswordReset(email, token);
+app.post("/profile",
+  requireAuth,
+  body("phone").optional().matches(/^\+\d{8,15}$/).withMessage("טלפון חייב להיות בפורמט E.164 (למשל +9725XXXXXXXX)"),
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      const msg = errors.array()[0]?.msg || "Invalid payload";
+      return res.status(400).render("profile", { csrfToken: req.csrfToken(), user: req.session.user, error: msg });
     }
-    res.send("If user exists, email sent");
-  } catch (e) { next(e); }
-});
 
-app.get("/reset/:token", async (req, res) => {
-  const record = await resetByToken(req.params.token);
-  if (!record) return res.status(400).send("Invalid or expired");
-  res.render("reset", { token: req.params.token, csrfToken: req.csrfToken() });
-});
-
-app.post("/reset/:token", body("password").isString().isLength({ min: 6 }), async (req, res) => {
-  const rec = await resetByToken(req.params.token);
-  if (!rec) return res.status(400).send("Invalid or expired");
-  await updateUserPassword(rec.user_id, await bcrypt.hash(String(req.body.password), 10));
-  await markResetUsed(req.params.token);
-  res.redirect("/login");
-});
+    const phone = safeString(req.body.phone);
+    await updateUserPhone(req.session.user.id, phone || null);
+    // עדכן בסשן כדי שיוצג במסכים
+    req.session.user.phone = phone || null;
+    res.render("profile", { csrfToken: req.csrfToken(), user: req.session.user, message: "עודכן בהצלחה" });
+  }
+);
 
 /* ------------------ User actions ------------------ */
 
@@ -285,18 +282,6 @@ app.post("/admin/clear-all", requireAuth, requireRole("admin"), async (req, res)
   await broadcastSlots();
   res.json({ ok: true });
 });
-
-/* ------------------ Daily (optional) ------------------ */
-cron.schedule("0 15 * * *", async () => {
-  try {
-    await pool.query(`DELETE FROM reservations;`);
-    await pool.query(`UPDATE slots SET label='', color='#e0f2fe', admin_lock=false;`);
-    await broadcastSlots();
-    console.log("Daily clear-all executed (15:00 Asia/Jerusalem)");
-  } catch (e) {
-    console.error("Daily clear-all failed:", e);
-  }
-}, { timezone: "Asia/Jerusalem" });
 
 /* ------------------ Errors & 404 ------------------ */
 
