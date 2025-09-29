@@ -5,8 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>פרופיל</title>
   <link rel="stylesheet" href="/style.css">
+  <style>
+    body.auth-luxe{
+      background:
+        radial-gradient(1200px 600px at 100% -10%, #f3f4f6 20%, transparent 70%),
+        radial-gradient(900px 500px at -10% 100%, #eef2ff 10%, transparent 60%),
+        #ffffff;
+    }
+    .auth-luxe .page{ min-height:100svh; display:flex; flex-direction:column; gap:16px; padding:24px; }
+    .auth-luxe .center-wrap{ flex:1; display:flex; align-items:flex-start; justify-content:center; }
+    .auth-luxe .card.luxe{
+      width:100%; max-width:560px;
+      padding:28px 28px;
+      border-radius:20px;
+      border:1px solid #e5e7eb;
+      box-shadow:0 10px 30px rgba(0,0,0,.08);
+      background:#fff;
+    }
+    .auth-luxe form > div{ margin-bottom:12px; }
+    .auth-luxe input[type="tel"]{ width:100%; box-sizing:border-box; }
+  </style>
 </head>
-<body>
+<body class="auth-luxe">
   <div class="page">
     <div class="card topbar">
       <div class="right">
@@ -21,27 +41,30 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>עדכון טלפון</h2>
+    <div class="center-wrap">
+      <div class="card luxe">
+        <h2>עדכון טלפון</h2>
 
-      <% if (typeof message !== 'undefined' && message) { %>
-        <p class="muted"><%= message %></p>
-      <% } %>
-      <% if (typeof error !== 'undefined' && error) { %>
-        <p class="error"><%= error %></p>
-      <% } %>
+        <% if (typeof message !== 'undefined' && message) { %>
+          <p class="muted"><%= message %></p>
+        <% } %>
+        <% if (typeof error !== 'undefined' && error) { %>
+          <p class="error"><%= error %></p>
+        <% } %>
 
-      <form method="post" action="/profile">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <div>
-          <label>טלפון (הקלד בלי ‎+972, לדוגמה: 0521234567)</label><br>
-          <input name="phone" type="tel" placeholder="0521234567" value="<%= user?.phone_local || '' %>">
-        </div>
-        <div style="margin-top:10px">
-          <button class="badge" type="submit">שמור</button>
-        </div>
-      </form>
+        <form method="post" action="/profile">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <div>
+            <label>טלפון (הקלד בלי ‎+972, לדוגמה: 0521234567)</label><br>
+            <input name="phone" type="tel" placeholder="0521234567" value="<%= user?.phone_local || '' %>">
+          </div>
+          <div style="margin-top:6px">
+            <button class="badge" type="submit">שמור</button>
+          </div>
+        </form>
+      </div>
     </div>
+
   </div>
 </body>
 </html>
