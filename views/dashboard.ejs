@@ -8,15 +8,13 @@
 </head>
 <body data-role="<%= (typeof user !== 'undefined' && user && user.role) ? user.role : 'user' %>">
   <%
-    // בטיחות נגד undefined
     const U = (typeof user !== 'undefined' && user) ? user : {};
     const SLOTS = Array.isArray(slots) ? slots : [];
     const CSRF = (typeof csrfToken !== 'undefined' && csrfToken) ? csrfToken : '';
 
-    // מפיקים רשימת שעות דינמית מהנתונים (מסודרת "HH:MM")
+    // שעות דינמיות מתוך הנתונים
     const HOURS = [...new Set(SLOTS.map(s => s.time_label))].sort((a,b) => String(a).localeCompare(String(b)));
 
-    // קיבוץ לפי שעה
     const byHour = {};
     SLOTS.forEach(s => {
       if (!byHour[s.time_label]) byHour[s.time_label] = [];
@@ -28,17 +26,9 @@
         if ((a.row_index ?? 0) !== (b.row_index ?? 0)) return (a.row_index ?? 0) - (b.row_index ?? 0);
         return (a.col_index ?? 0) - (b.col_index ?? 0);
       });
-      // אם פחות מ-4, משלימים ויזואלית (לא נוגעים בבסיס הנתונים כאן)
       while (arr.length < 4) arr.push({
-        slot_id: -1,
-        label: '',
-        color: '#e0f2fe',
-        time_label: t,
-        col_index: arr.length+1,
-        row_index: 0,
-        active: false,
-        user_id: null,
-        admin_lock: false,
+        slot_id: -1, label: '', color: '#e0f2fe', time_label: t, col_index: arr.length+1,
+        row_index: 0, active: false, user_id: null, admin_lock: false,
       });
       return arr.slice(0,4);
     }
@@ -86,7 +76,7 @@
                const mine  = hasUser && U.id && (s.user_id === U.id);
                const active = !!s.active;
                const showName = taken ? (s.label || '') : '';
-               const bg = taken ? '#86efac' : (s.color || '#e0f2fe'); // צבע מגיע מהשרת/DB
+               const bg = taken ? '#86efac' : (s.color || '#e0f2fe');
                const disabledForUser = (!active || (taken && !mine));
           %>
             <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
