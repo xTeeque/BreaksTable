@@ -1,102 +1,226 @@
-/* Base */
-html, body { height: 100%; }
-body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #f8fafc; }
+/* =========================================================
+   BreaksTable – Global Styles (RTL)
+   - עיצוב אחיד לכל הכפתורים
+   - גריד מסודר לשעות ולמשבצות
+   - כפתורי אדמין/טפסים/מצבי הודעה
+   ========================================================= */
 
-/* Center page cards like login/register */
-.page-center {
-  min-height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+/* ---------- Theme ----------- */
+:root{
+  --bg:            #0b1020;     /* רקע כללי כהה-כחלחל נעים */
+  --card:          #121a30;     /* כרטיסים */
+  --card-2:        #0f1629;
+  --border:        #2a3554;
+  --text:          #e8eefc;
+  --muted:         #b6c3e0;
+
+  --primary:       #3b82f6;     /* כחול */
+  --success:       #16a34a;     /* ירוק */
+  --danger:        #ef4444;     /* אדום */
+  --info:          #0891b2;     /* טורקיז */
+
+  --chip-bg:       #1b2442;
+  --chip-bg-2:     #141c33;
+
+  --radius:        16px;
+  --radius-sm:     12px;
+  --radius-lg:     20px;
+
+  --shadow-1:      0 4px 20px rgba(0,0,0,.25);
+  --shadow-2:      0 8px 28px rgba(0,0,0,.35);
 }
 
-/* Card & typography */
-.card { max-width: 520px; margin: 5rem auto; background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1); }
-h1 { margin: 0 0 1rem 0; font-size: 1.6rem; }
-form { display: grid; gap: .75rem; }
+/* ---------- Reset / Base ----------- */
+*{box-sizing:border-box}
+html{font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Liberation Sans", sans-serif}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  min-height:100dvh; direction:rtl;
+}
 
-input[type="email"], input[type="password"], input[type="text"] { padding: .6rem .75rem; border: 1px solid #e5e7eb; border-radius: .5rem; }
-button { padding: .6rem .75rem; border: 0; border-radius: .5rem; background: #111827; color: white; cursor: pointer; }
-.muted { color: #6b7280; font-size: .9rem; }
-.error { color: #b91c1c; background: #fee2e2; padding: .5rem .75rem; border-radius: .5rem; }
-.info { color: #065f46; background: #d1fae5; padding: .5rem .75rem; border-radius: .5rem; }
-a { color: #1d4ed8; text-decoration: none; }
-.row { display:flex; justify-content: space-between; align-items: center; }
+/* קישורים */
+a{color:var(--primary); text-decoration:none}
+a:hover{text-decoration:underline}
 
-/* Grid: שעה מימין + 4 משבצות משמאל */
+/* ריכוז עמודים פשוט */
+.page-center{
+  min-height:100dvh; display:grid; place-items:center; padding:24px;
+}
+
+/* כרטיס כללי */
+.card{
+  width:100%;
+  background:linear-gradient(180deg,var(--card) 0%, var(--card-2) 100%);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:var(--shadow-1);
+  padding:20px 20px;
+}
+
+/* פס עליון */
+.topbar{ margin-bottom:14px }
+.muted{ color:var(--muted) }
+
+/* טקסטים */
+h1,h2,h3{margin:0; font-weight:700}
+p{margin:.5rem 0}
+
+/* הודעות מצב */
+.error{
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  border:1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  color:#ffd7d7; padding:10px 12px; border-radius:12px; margin:10px 0;
+}
+.success{
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  border:1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  color:#dcffe6; padding:10px 12px; border-radius:12px; margin:10px 0;
+}
+
+/* ---------- Forms ----------- */
+input,select,textarea{
+  background:#0c1324; color:var(--text);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:10px 12px;
+  outline:none; width:100%;
+}
+input:focus,select:focus,textarea:focus{
+  border-color: color-mix(in srgb, var(--primary) 60%, var(--border));
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+/* טפסים קצרים בשורה */
+form.inline{ display:inline-block }
+
+/* ---------- Buttons (אחיד לכל הכפתורים) ----------- */
+/* בסיס אחיד גם ל-<button> בלי מחלקה וגם ל-.btn/.badge */
+button,
+.btn,
+.badge{
+  appearance:none; cursor:pointer;
+  background:linear-gradient(180deg, #1b2b55 0%, #172244 100%);
+  color:#eaf1ff;
+  border:1px solid #2a3b6b;
+  border-radius:999px;
+  padding:8px 14px; font-weight:600; font-size:14px;
+  transition:transform .06s ease, box-shadow .12s ease, background .2s ease, border-color .2s ease;
+  box-shadow: 0 2px 10px rgba(0,0,0,.25);
+}
+button:hover, .btn:hover, .badge:hover{
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  border-color:#3b4f89;
+}
+button:active, .btn:active, .badge:active{
+  transform: translateY(0);
+}
+button:focus-visible, .btn:focus-visible, .badge:focus-visible{
+  outline:none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent), 0 6px 18px rgba(0,0,0,.35);
+}
+
+/* וריאציות */
+.btn.success, .badge.success{ background:linear-gradient(180deg, #1d5e3a 0%, #134828 100%); border-color:#1c6d3c }
+.btn.danger,  .badge.danger { background:linear-gradient(180deg, #6b1c1c 0%, #4a1212 100%); border-color:#7e2323 }
+.btn.info,    .badge.info   { background:linear-gradient(180deg, #114d59 0%, #0c3941 100%); border-color:#176a78 }
+
+/* מצב מושבת */
+button:disabled, .btn:disabled, .badge:disabled{
+  opacity:.55; cursor:not-allowed; transform:none;
+}
+
+/* כפתורי תג קטנים בשורות אדמין */
+.admin-actions .badge,
+.admin-actions .btn{
+  padding:6px 10px; font-weight:700; font-size:12px;
+}
+
+/* ---------- Grid (Dashboard) ----------- */
 .grid{
   display:grid;
-  grid-template-columns:120px repeat(4,1fr); /* שעה + 4 משבצות */
-  gap:6px;
-  direction:rtl; /* כך התא הראשון בשורה (השעה) יוצג מימין */
+  grid-template-columns: 110px repeat(4, 1fr);
+  gap:10px;
 }
 
 .cell{
-  padding:12px 10px;border-radius:10px;text-align:center;color:#111;
-  user-select:none;font-weight:600;cursor:pointer;
-  background:#e0f2fe; /* ← תכלת עדין (במקום #e5e7eb) */
-  transition:box-shadow .12s ease, transform .08s ease;
+  min-height:76px;
+  background:#0d152b;
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  padding:10px;
+  display:flex; flex-direction:column; justify-content:space-between;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+  transition: border-color .2s ease, box-shadow .2s ease, transform .06s ease;
 }
-.cell:hover:not(.time){ box-shadow:0 2px 8px rgba(0,0,0,.12); transform:translateY(-1px); }
+
+/* רמז אינטראקטיבי לתאים פעילים */
+.cell:not(.time):hover{
+  border-color:#3b4f89;
+}
+
+/* תא שעה (ימין) */
 .cell.time{
-  cursor:default;
-  font-weight:700;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:#f3f4f6;
+  background:#0b1326;
+  display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:16px;
+  letter-spacing:.5px;
+  position:relative;
 }
-.cell.disabled{ opacity:.6; cursor:not-allowed; }
-
-/* לאדמין – גם כשסגור/תפוס אין 'not-allowed' */
-body[data-role="admin"] .cell.disabled{ cursor:pointer; opacity:.85; }
-body[data-role="admin"] .cell.disabled:hover{ box-shadow:0 2px 8px rgba(0,0,0,.12); transform:translateY(-1px); }
-
-.cell.mine{ outline:3px solid #16a34a; }
-
-.badge{
-  display:inline-block;
-  margin-top:6px;
-  padding:2px 8px;
-  font-size:12px;
-  border-radius:999px;
-  background:rgba(0,0,0,.12);
-}
-.admin-actions{ margin-top:6px; display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
-.badge.success{ background:#16a34a; color:#fff; }
-.badge.danger{  background:#b91c1c; color:#fff; }
-.badge.info{    background:#0ea5e9; color:#fff; }
-
-.topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
-
-/* --- Forms (רוחב שדות זהה לכפתור, ממורכז בכרטיס) --- */
-.card form input[type="email"],
-.card form input[type="password"],
-.card form input[type="text"] {
-  display: block;
-  width: 100%;
-  max-width: 420px;
-  height: 42px;
-  padding: 8px 12px;
-  margin: 6px 0 12px;
-  font-size: 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  box-sizing: border-box;
-  justify-self: center; /* ממורכז בתוך ה-grid של הטופס */
+.cell.time .time-text{ color:#dce7ff }
+body[data-role="admin"] .cell.time{ cursor:pointer }
+body[data-role="admin"] .cell.time:hover{
+  box-shadow: inset 0 0 0 1px #3b4f89, 0 0 0 3px rgba(59,130,246,.12);
 }
 
-.card form button {
-  display: inline-block;
-  width: 100%;
-  max-width: 420px;
-  height: 44px;
-  padding: 10px 14px;
-  font-size: 16px;
-  border: 0;
-  border-radius: 8px;
-  background: #111827;
-  color: #fff;
-  cursor: pointer;
-  justify-self: center; /* ממורכז בתוך ה-grid של הטופס */
+/* טקסט בתוך תא משבצת */
+.slot-text{
+  font-weight:700; font-size:15px; line-height:1.2;
+  text-overflow:ellipsis; white-space:nowrap; overflow:hidden;
 }
+
+/* צ'יפ מצב קטן בתוך תא */
+.cell .badge, .cell .btn{
+  align-self:flex-start;
+  margin-top:8px;
+}
+
+/* תא שלי / מושבת */
+.cell.mine{
+  outline:2px dashed color-mix(in srgb, var(--success) 55%, transparent);
+  outline-offset:2px;
+}
+.cell.disabled{
+  opacity:.7;
+}
+
+/* אזור פעולות אדמין בתוך תא */
+.admin-actions{
+  display:flex; gap:8px; flex-wrap:wrap;
+  margin-top:10px;
+}
+
+/* ---------- Layout refinements ----------- */
+@media (max-width: 900px){
+  .grid{ grid-template-columns: 90px repeat(4, 1fr); }
+  .cell{ min-height:72px; }
+}
+@media (max-width: 720px){
+  .grid{ grid-template-columns: 80px repeat(4, minmax(0,1fr)); gap:8px; }
+}
+@media (max-width: 520px){
+  .grid{ grid-template-columns: 70px repeat(2, 1fr); }
+  /* במובייל אפשר להציג שורה לכל שעה + שתי משבצות בכל פעם,
+     אבל מאחר שהרינדור מגיע מהשרת ל-4 תאים, פשוט יישבר לשורות */
+}
+
+/* ---------- Tables (אם יהיו בעתיד) ----------- */
+table{ width:100%; border-collapse:collapse; border:1px solid var(--border); border-radius:12px; overflow:hidden }
+th,td{ padding:10px; border-bottom:1px solid var(--border) }
+th{ text-align:start; color:#c9d6f4; background:#0f1730 }
+
+/* ---------- Utility ----------- */
+.hidden{ display:none !important }
+.center{ text-align:center }
+.right{ text-align:right }
+.left{ text-align:left }
