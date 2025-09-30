@@ -1,6 +1,6 @@
 // public/dashboard.js
-// מאזין לכל הכפתורים (יוזר ואדמין) בצורה לא פולשנית.
-// כולל השגת CSRF אוטומטית כך שלא חייבים להזריק אותו ל-DOM.
+// מאזין לכל הכפתורים (יוזר ואדמין) בצורה לא פולשנית ומחזיר את כל הפונקציונליות.
+// כולל השגת CSRF אוטומטית גם אם אין meta/input בדף, וריענון אחרי שינויים.
 
 (function () {
   // -------- CSRF ----------
@@ -36,7 +36,7 @@
 
   function getSlotId(el) {
     const c = el?.closest("[data-slot-id]");
-    const id = c?.dataset?.slotId || el?.dataset?.slotId;
+    const id = c?.dataset?.slotId || el?.dataset?.slotId || el?.getAttribute?.("data-slot-id");
     return id ? Number(id) : null;
   }
   function getTimeLabel(el) {
@@ -72,7 +72,7 @@
 
   function reloadSoon(ms = 50) { setTimeout(() => location.reload(), ms); }
 
-  // -------- Socket.IO (אם קיים בצד לקוח) ----------
+  // -------- Socket.IO (אם נטען) ----------
   try {
     if (window.io && !window.__slotsIoBound) {
       const socket = io();
@@ -103,7 +103,6 @@
   async function onToggleActive(el) {
     const slotId = getSlotId(el);
     if (!slotId) return alert("לא נמצאה משבצת");
-    // תומך גם ב-checkbox וגם בכפתור: אם יש property checked – נשתמש בו; אחרת נבדוק data-active
     const active = (typeof el.checked === "boolean") ? el.checked : (el.dataset.active === "true" || el.dataset.active === "1");
     await apiPostForm(`/admin/slots/${slotId}/active`, { active: active ? "1" : "" });
     reloadSoon();
@@ -150,7 +149,7 @@
     const el = ev.target.closest("button, a, input[type=checkbox], [data-slot-id]");
     if (!el) return;
 
-    // סדר: קודם אדמין כדי לא להתנגש עם קליק בתא
+    // אדמין
     if (el.matches('[data-action="cleanup"], [data-cleanup-all], .btn-cleanup-all')) {
       ev.preventDefault(); onCleanup(); return;
     }
@@ -167,27 +166,25 @@
       ev.preventDefault(); onClearSlot(el); return;
     }
     if (el.matches('[data-action="toggle-active"], [data-toggle-active], .btn-toggle-active, input[type=checkbox][data-slot-id]')) {
-      // לא תמיד רוצים למנוע ברירת מחדל של checkbox, אך נעדיף כן כדי שלא יזוז פוקוס.
       ev.preventDefault(); onToggleActive(el); return;
     }
     if (el.matches('[data-action="set-label"], [data-set-label], .btn-set-label')) {
       ev.preventDefault(); onSetLabel(el); return;
     }
 
-    // פעולות יוזר (הרשמה/ביטול)
+    // יוזר
     if (el.matches('[data-action="unreserve"], [data-unreserve], .btn-unreserve')) {
       ev.preventDefault(); onUnreserve(); return;
     }
     if (
       el.matches('[data-action="reserve"], [data-reserve], .btn-reserve') ||
-      // קליק על תא משבצת (אם התא/הורה נושא data-slot-id ואין עליו data-admin)
       (el.hasAttribute('data-slot-id') && !el.closest('[data-admin], .admin-controls'))
     ) {
       ev.preventDefault(); onReserve(el); return;
     }
   });
 
-  // גם שינוי של checkbox שלא נתפס ב-click
+  // שינוי ישיר של checkbox (אם לא נתפס ב-click)
   document.addEventListener("change", (ev) => {
     const el = ev.target;
     if (el.matches('input[type=checkbox][data-slot-id], [data-action="toggle-active"]')) {
