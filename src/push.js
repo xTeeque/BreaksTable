@@ -48,7 +48,6 @@ export async function sendPushToUser(userId, payload) {
     } catch (e) {
       const code = e?.statusCode || e?.code;
       if (code === 404 || code === 410) {
-        // subscription expired → מחיקה
         await pool.query(`DELETE FROM push_subscriptions WHERE endpoint = $1`, [sub.endpoint]);
       } else {
         console.warn("[PUSH] send error:", code, e?.message || e);
@@ -57,6 +56,40 @@ export async function sendPushToUser(userId, payload) {
   }
 }
 
-/** למציאת רשומות due אם תרצה קרון T-3 דקות (אפשר להשאיר אם כבר יש): */
-export async function findDueReminders() { return { rows: [] }; }
-export async function markReminderSent() { /* no-op כאן */ }
+/** תזכורות T-3 דקות — לוגיקת בחירה מה־DB */
+export async function findDueReminders() {
+  const { rows } = await pool.query(`
+    WITH now_il AS (
+      SELECT (now() AT TIME ZONE 'Asia/Jerusalem') AS ts
+    ),
+    target AS (
+      SELECT to_char((SELECT ts FROM now_il) + interval '3 minute', 'HH24:MI') AS hhmm,
+             date_trunc('minute', (SELECT ts FROM now_il) + interval '3 minute') AS sched_at
+    ),
+    due AS (
+      SELECT r.user_id, s.id AS slot_id, s.time_label,
+             (SELECT sched_at FROM target) AS scheduled_for
+      FROM reservations r
+      JOIN slots s ON s.id = r.slot_id
+      WHERE s.active = TRUE
+        AND s.time_label = (SELECT hhmm FROM target)
+    )
+    SELECT d.*
+    FROM due d
+    LEFT JOIN push_reminders pr
+      ON pr.user_id = d.user_id
+     AND pr.slot_id = d.slot_id
+     AND pr.scheduled_for = d.scheduled_for
+    WHERE pr.user_id IS NULL;
+  `);
+  return rows;
+}
+
+export async function markReminderSent(userId, slotId, scheduledFor) {
+  await pool.query(
+    `INSERT INTO push_reminders (user_id, slot_id, scheduled_for)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (user_id, slot_id, scheduled_for) DO NOTHING`,
+    [userId, slotId, scheduledFor]
+  );
+}
