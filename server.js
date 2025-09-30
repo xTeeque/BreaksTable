@@ -82,11 +82,41 @@ app.use(session({
   },
 }));
 
-/* ------------------ Cron: תזכורות T-3 דקות (מוחרג מ-CSRF) ------------------ */
-// חשוב: לפני app.use(csrfProtection) כדי שלא ייחסם ב-403
-app.post("/tasks/send-due-reminders", async (req, res) => {
-  const secret = req.get("x-cron-secret");
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+/* ------------------ Cron endpoints BEFORE CSRF ------------------ */
+// עוזרי אימות: x-cron-secret או Authorization: Bearer או ?key=...
+function getProvidedCronSecret(req) {
+  const h1 = req.get("x-cron-secret");
+  const auth = req.get("authorization");
+  const bearer = auth && auth.startsWith("Bearer ") ? auth.slice(7) : null;
+  const qp = req.query?.key;
+  const bodyKey = req.body?.key;
+  return h1 || bearer || qp || bodyKey || null;
+}
+function cronAuthorized(req) {
+  const expected = process.env.CRON_SECRET;
+  const provided = getProvidedCronSecret(req);
+  return !!expected && provided === expected;
+}
+
+// ראוט בדיקה כדי לוודא שהקוד החדש עלה ושיש CRON_SECRET
+app.get("/tasks/ping", (req, res) => {
+  res.json({
+    ok: true,
+    route: "/tasks/ping",
+    hasEnvCronSecret: !!process.env.CRON_SECRET
+  });
+});
+
+// שליחת תזכורות T-3 (מאפשר GET או POST לטובת cron-job.org)
+app.all("/tasks/send-due-reminders", async (req, res) => {
+  if (!cronAuthorized(req)) {
+    const provided = getProvidedCronSecret(req);
+    console.warn("[CRON] 403", {
+      hasEnv: !!process.env.CRON_SECRET,
+      providedLen: provided ? String(provided).length : 0,
+      method: req.method,
+      ua: req.get("user-agent") || "n/a"
+    });
     return res.status(403).send("Forbidden");
   }
 
@@ -127,7 +157,6 @@ app.get("/", requireAuth, async (req, res, next) => {
     res.render("dashboard", { slots, user: req.session.user, csrfToken: req.csrfToken() });
   } catch (e) { next(e); }
 });
-
 app.get("/dashboard", requireAuth, (req, res) => res.redirect("/"));
 
 app.get("/login", (req, res) => res.render("login", { csrfToken: req.csrfToken() }));
@@ -371,12 +400,10 @@ app.post("/admin/cleanup", requireAuth, requireRole("admin"), async (req, res) =
 
 /* ------------------ Web Push API ------------------ */
 
-// מפתח ציבורי (לבדיקה/דיבוג)
 app.get("/push/key", requireAuth, (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || "" });
 });
 
-// רישום מנוי Push
 app.post("/push/subscribe", requireAuth, async (req, res) => {
   const sub = {
     endpoint: req.body?.endpoint,
@@ -390,7 +417,6 @@ app.post("/push/subscribe", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ביטול מנוי Push
 app.post("/push/unsubscribe", requireAuth, async (req, res) => {
   const endpoint = req.body?.endpoint;
   if (!endpoint) return res.status(400).send("Missing endpoint");
@@ -398,7 +424,6 @@ app.post("/push/unsubscribe", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// 🔔 ראוט בדיקה לשליחת התראה מיידית למשתמש המחובר
 app.post("/push/test", requireAuth, async (req, res) => {
   await sendPushToUser(req.session.user.id, {
     title: "בדיקת התראה",
@@ -423,4 +448,5 @@ app.use((req, res) => res.status(404).send("Not Found"));
 
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`[CRON] Secret set: ${process.env.CRON_SECRET ? "yes" : "no"}`);
 });
