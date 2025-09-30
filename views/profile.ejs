@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>פרופיל</title>
   <link rel="stylesheet" href="/style.css">
+  <meta name="vapid-public-key" content="<%= vapidPublicKey %>">
   <style>
     body.auth-luxe{
       background:
@@ -22,8 +23,8 @@
       box-shadow:0 10px 30px rgba(0,0,0,.08);
       background:#fff;
     }
-    .auth-luxe form > div{ margin-bottom:12px; }
-    .auth-luxe input[type="tel"]{ width:100%; box-sizing:border-box; }
+    .auth-luxe .actions{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .muted { color:#6b7280; }
   </style>
 </head>
 <body class="auth-luxe">
@@ -43,28 +44,21 @@
 
     <div class="center-wrap">
       <div class="card luxe">
-        <h2>עדכון טלפון</h2>
+        <h2>התראות בדפדפן</h2>
+        <p class="muted">אפשר לקבל תזכורת 3 דקות לפני המשבצת שלך — גם כשהאתר סגור.</p>
 
-        <% if (typeof message !== 'undefined' && message) { %>
-          <p class="muted"><%= message %></p>
-        <% } %>
-        <% if (typeof error !== 'undefined' && error) { %>
-          <p class="error"><%= error %></p>
-        <% } %>
-
-        <form method="post" action="/profile">
-          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <div>
-            <label>טלפון (הקלד בלי ‎+972, לדוגמה: 0521234567)</label><br>
-            <input name="phone" type="tel" placeholder="0521234567" value="<%= user?.phone_local || '' %>">
-          </div>
-          <div style="margin-top:6px">
-            <button class="badge" type="submit">שמור</button>
-          </div>
-        </form>
+        <div class="actions">
+          <button class="badge" type="button" data-push-enable>הפעל התראות</button>
+          <button class="badge danger" type="button" data-push-disable>בטל התראות</button>
+        </div>
+        <p style="margin-top:8px"><strong>סטטוס:</strong> <span data-push-status>בודק...</span></p>
       </div>
     </div>
-
   </div>
+
+  <script>
+    window.CSRF_TOKEN = "<%= csrfToken %>";
+  </script>
+  <script src="/push.js" defer></script>
 </body>
 </html>
