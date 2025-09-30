@@ -82,6 +82,34 @@ app.use(session({
   },
 }));
 
+/* ------------------ Cron: תזכורות T-3 דקות (מוחרג מ-CSRF) ------------------ */
+// חשוב: לפני app.use(csrfProtection) כדי שלא ייחסם ב-403
+app.post("/tasks/send-due-reminders", async (req, res) => {
+  const secret = req.get("x-cron-secret");
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+    return res.status(403).send("Forbidden");
+  }
+
+  try {
+    const due = await findDueReminders();
+    for (const row of due) {
+      const hhmm = row.time_label;
+      const payload = {
+        title: "⏰ תזכורת: בעוד 3 דקות",
+        body:  `המשבצת שלך ל־${hhmm} מתקרבת.`,
+        url:   `${process.env.APP_BASE_URL || ""}/`,
+        tag:   `slot-${row.slot_id}-${hhmm}`
+      };
+      await sendPushToUser(row.user_id, payload);
+      await markReminderSent(row.user_id, row.slot_id, row.scheduled_for);
+    }
+    res.json({ ok: true, sent: due.length });
+  } catch (e) {
+    console.error("send-due-reminders failed:", e);
+    res.status(500).send("Internal error");
+  }
+});
+
 const csrfProtection = csrf();
 app.use(csrfProtection);
 
@@ -379,30 +407,6 @@ app.post("/push/test", requireAuth, async (req, res) => {
     tag: "manual-test"
   });
   res.json({ ok: true });
-});
-
-/* ------------------ Cron: תזכורות T-3 דקות ------------------ */
-
-app.post("/tasks/send-due-reminders", async (req, res) => {
-  const secret = req.get("x-cron-secret");
-  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
-    return res.status(403).send("Forbidden");
-  }
-
-  const due = await findDueReminders();
-  for (const row of due) {
-    const hhmm = row.time_label;
-    const payload = {
-      title: "⏰ תזכורת: בעוד 3 דקות",
-      body:  `המשבצת שלך ל־${hhmm} מתקרבת.`,
-      url:   `${process.env.APP_BASE_URL || ""}/`,
-      tag:   `slot-${row.slot_id}-${hhmm}`
-    };
-    await sendPushToUser(row.user_id, payload);
-    await markReminderSent(row.user_id, row.slot_id, row.scheduled_for);
-  }
-
-  res.json({ ok: true, sent: due.length });
 });
 
 /* ------------------ Errors & 404 ------------------ */
