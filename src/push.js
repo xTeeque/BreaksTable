@@ -37,7 +37,6 @@ export async function getUserSubscriptions(userId) {
   }));
 }
 
-/** מצא תזכורות שיש לשלוח T-3 דקות עכשיו (לפי Asia/Jerusalem) ושלא נשלחו */
 export async function findDueReminders() {
   const { rows } = await pool.query(`
     WITH now_il AS (
@@ -74,7 +73,6 @@ export async function markReminderSent(userId, slotId, scheduledFor) {
   `, [userId, slotId, scheduledFor]);
 }
 
-/** שלח נוטיפיקציות לכל המנויים של המשתמש */
 export async function sendPushToUser(userId, payload) {
   const subs = await getUserSubscriptions(userId);
   for (const sub of subs) {
@@ -83,7 +81,6 @@ export async function sendPushToUser(userId, payload) {
     } catch (e) {
       const code = e?.statusCode || e?.code;
       if (code === 404 || code === 410) {
-        // subscription expired → מחיקה
         await pool.query(`DELETE FROM push_subscriptions WHERE endpoint = $1`, [sub.endpoint]);
       } else {
         console.warn("[PUSH] send error:", code, e?.message || e);
