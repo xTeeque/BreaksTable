@@ -370,6 +370,17 @@ app.post("/push/unsubscribe", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// 🔔 ראוט בדיקה לשליחת התראה מיידית למשתמש המחובר
+app.post("/push/test", requireAuth, async (req, res) => {
+  await sendPushToUser(req.session.user.id, {
+    title: "בדיקת התראה",
+    body: "שלום! אם אתה רואה את זה — הערוץ עובד ✅",
+    url: `${process.env.APP_BASE_URL || ""}/`,
+    tag: "manual-test"
+  });
+  res.json({ ok: true });
+});
+
 /* ------------------ Cron: תזכורות T-3 דקות ------------------ */
 
 app.post("/tasks/send-due-reminders", async (req, res) => {
