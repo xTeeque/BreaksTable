@@ -68,6 +68,19 @@ app.use(morgan("dev"));
 /* ---------- סטטי ---------- */
 app.use(express.static(path.join(__dirname, "public")));
 
+// ✳️ הגשה מפורשת של dashboard.js (ועוקף SW)
+// אם יש לך גם public/push.js, אפשר לפתוח דומה:
+app.get("/dashboard.js", (_req, res) => {
+  res.type("application/javascript");
+  res.set("Cache-Control", "no-cache");
+  res.sendFile(path.join(__dirname, "public", "dashboard.js"));
+});
+app.get("/push.js", (_req, res) => {
+  res.type("application/javascript");
+  res.set("Cache-Control", "no-cache");
+  res.sendFile(path.join(__dirname, "public", "push.js"));
+});
+
 const PgStore = pgSimpleFactory(session);
 app.use(session({
   store: new PgStore({ pool, tableName: "session", createTableIfMissing: true }),
@@ -83,15 +96,13 @@ app.use(session({
   },
 }));
 
-/* ------------------ Cron endpoints BEFORE CSRF ------------------ */
-// אימות: x-cron-secret / Authorization: Bearer / ?key=...
+/* ------------------ Cron BEFORE CSRF ------------------ */
 function getProvidedCronSecret(req) {
   const h1 = req.get("x-cron-secret");
   const auth = req.get("authorization");
   const bearer = auth && auth.startsWith("Bearer ") ? auth.slice(7) : null;
   const qp = req.query?.key;
   const bodyKey = req.body?.key;
-  // חיתוך רווחים/גרשיים שנדבקו חלילה
   const val = h1 || bearer || qp || bodyKey || null;
   return val == null ? null : String(val).trim();
 }
@@ -101,19 +112,12 @@ function cronAuthorized(req) {
   return !!expected && provided === expected;
 }
 
-// בדיקת חיים פשוטה
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
-// פינג לדיבוג התקנה
 app.get("/tasks/ping", (req, res) => {
-  res.json({
-    ok: true,
-    route: "/tasks/ping",
-    hasEnvCronSecret: !!process.env.CRON_SECRET
-  });
+  res.json({ ok: true, route: "/tasks/ping", hasEnvCronSecret: !!process.env.CRON_SECRET });
 });
 
-// שליחת תזכורות T-3 (מאפשר GET או POST)
 app.all("/tasks/send-due-reminders", async (req, res) => {
   if (!cronAuthorized(req)) {
     const provided = getProvidedCronSecret(req);
@@ -227,7 +231,7 @@ app.post("/register",
   }
 );
 
-/* ---- Profile: ניהול התראות דפדפן ---- */
+/* ---- Profile (Push) ---- */
 app.get("/profile", requireAuth, (req, res) => {
   const user = { ...req.session.user };
   res.render("profile", {
@@ -237,7 +241,7 @@ app.get("/profile", requireAuth, (req, res) => {
   });
 });
 
-/* ------------------ Forgot / Reset ללא מייל ------------------ */
+/* ---- Forgot / Reset ---- */
 app.get("/forgot", (req, res) => {
   res.render("forgot", { csrfToken: req.csrfToken() });
 });
@@ -323,7 +327,7 @@ app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async
   res.json({ ok: true });
 });
 
-// שינוי שם משבצת ע"י אדמין: מסיר משתמש קודם, נועל, מציג שם שנבחר, ירוק
+// שינוי שם משבצת ע"י אדמין
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
@@ -333,7 +337,7 @@ app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async 
   return res.json({ ok: true });
 });
 
-// עדכון כללי למשבצת (אופציונלי)
+// עדכון כללי למשבצת
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
     slot_id: Number(req.body.slot_id),
@@ -388,7 +392,7 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// ניקוי כללי: איפוס צבע/טקסט לכל משבצת שאינה תפוסה ואינה נעולה
+// ניקוי כללי
 app.post("/admin/cleanup", requireAuth, requireRole("admin"), async (req, res) => {
   try {
     await pool.query(`
