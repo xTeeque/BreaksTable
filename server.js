@@ -48,7 +48,8 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 
 const app = express();
 const httpServer = httpPkg.createServer(app);
@@ -83,7 +84,7 @@ app.use(session({
 }));
 
 /* ------------------ Cron endpoints BEFORE CSRF ------------------ */
-// עוזרי אימות: x-cron-secret או Authorization: Bearer או ?key=...
+// אימות: x-cron-secret / Authorization: Bearer / ?key=...
 function getProvidedCronSecret(req) {
   const h1 = req.get("x-cron-secret");
   const auth = req.get("authorization");
@@ -98,7 +99,10 @@ function cronAuthorized(req) {
   return !!expected && provided === expected;
 }
 
-// ראוט בדיקה כדי לוודא שהקוד החדש עלה ושיש CRON_SECRET
+// בדיקת חיים פשוטה לשירותים חיצוניים / Render Health Check
+app.get("/healthz", (_req, res) => res.status(200).send("ok"));
+
+// פינג לדיבוג התקנה
 app.get("/tasks/ping", (req, res) => {
   res.json({
     ok: true,
@@ -107,7 +111,7 @@ app.get("/tasks/ping", (req, res) => {
   });
 });
 
-// שליחת תזכורות T-3 (מאפשר GET או POST לטובת cron-job.org)
+// שליחת תזכורות T-3 (מאפשר GET או POST)
 app.all("/tasks/send-due-reminders", async (req, res) => {
   if (!cronAuthorized(req)) {
     const provided = getProvidedCronSecret(req);
@@ -157,6 +161,7 @@ app.get("/", requireAuth, async (req, res, next) => {
     res.render("dashboard", { slots, user: req.session.user, csrfToken: req.csrfToken() });
   } catch (e) { next(e); }
 });
+
 app.get("/dashboard", requireAuth, (req, res) => res.redirect("/"));
 
 app.get("/login", (req, res) => res.render("login", { csrfToken: req.csrfToken() }));
@@ -446,7 +451,15 @@ app.use((err, req, res, next) => {
 
 app.use((req, res) => res.status(404).send("Not Found"));
 
-httpServer.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
   console.log(`[CRON] Secret set: ${process.env.CRON_SECRET ? "yes" : "no"}`);
+});
+
+/* ---- לוגים נוחים לשגיאות שלא נתפסו ---- */
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
 });
