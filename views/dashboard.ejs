@@ -5,95 +5,111 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>דשבורד</title>
   <link rel="stylesheet" href="/style.css">
-  <!-- מאפשר ל-JS לשלוח POST מבלי לשבור את העיצוב -->
-  <meta name="csrf-token" content="<%= csrfToken %>">
 </head>
-<body>
+<body data-role="<%= (typeof user !== 'undefined' && user && user.role) ? user.role : 'user' %>">
+  <%
+    const U = (typeof user !== 'undefined' && user) ? user : {};
+    const SLOTS = Array.isArray(slots) ? slots : [];
+    const CSRF = (typeof csrfToken !== 'undefined' && csrfToken) ? csrfToken : '';
 
-  <!-- כותרת עליונה כפי שהיה: שם משתמש מימין; משמאל כפתורי אדמין + פרופיל/התנתקות -->
-  <div class="card topbar">
-    <div class="right">
-      <span>שלום, <strong><%= [user?.first_name || "", user?.last_name || ""].join(" ").trim() %></strong></span>
-      <button class="badge" data-action="unreserve">שחרר את המשבצת שלי</button>
+    const HOURS = [...new Set(SLOTS.map(s => s.time_label))].sort((a,b) => String(a).localeCompare(String(b)));
+
+    const byHour = {};
+    SLOTS.forEach(s => { if (!byHour[s.time_label]) byHour[s.time_label] = []; byHour[s.time_label].push(s); });
+
+    function fourFor(t) {
+      const arr = (byHour[t] || []).slice().sort((a,b) => {
+        if ((a.row_index ?? 0) !== (b.row_index ?? 0)) return (a.row_index ?? 0) - (b.row_index ?? 0);
+        return (a.col_index ?? 0) - (b.col_index ?? 0);
+      });
+      while (arr.length < 4) arr.push({ slot_id: -1, label: '', color: '#e0f2fe', time_label: t, col_index: arr.length+1, row_index: 0, active: false, user_id: null, admin_lock: false });
+      return arr.slice(0,4);
+    }
+  %>
+
+  <div class="page">
+    <!-- פס עליון: ימין = שלום; שמאל = כפתורי אדמין + פרופיל + התנתקות -->
+    <div class="card topbar">
+      <div class="right">
+        <span>שלום, <strong><%= [U.first_name || "", U.last_name || ""].join(" ").trim() %></strong></span>
+      </div>
+
+      <div class="left">
+        <% if (U.role === 'admin') { %>
+          <button id="btn-add-hour" class="badge">הוסף שעה</button>
+          <button id="btn-clear-all" class="badge danger">ניקוי כללי</button>
+        <% } %>
+
+        <a class="badge" href="/profile">פרופיל</a>
+
+        <form method="post" action="/logout" class="inline">
+          <input type="hidden" name="_csrf" value="<%= CSRF %>">
+          <button type="submit" class="badge">התנתקות</button>
+        </form>
+      </div>
     </div>
-    <div class="left">
-      <% if (user && user.role === 'admin') { %>
-        <button class="badge" data-action="create-hour">הוסף שעה</button>
-        <button class="badge" data-action="cleanup">ניקוי כללי</button>
-      <% } %>
-      <a class="badge" href="/profile">פרופיל</a>
-      <form method="post" action="/logout" class="inline">
-        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-        <button type="submit" class="badge">התנתקות</button>
-      </form>
+
+    <div class="card">
+      <p class="muted">משבצת נחשבת <strong>“תפוס”</strong> אם יש הרשמה או אם אדמין נעל אותה עם שם מותאם.</p>
+
+      <div id="grid" class="grid">
+        <% HOURS.forEach(time => { const cells = fourFor(time); %>
+          <div class="cell time" data-time="<%= time %>">
+            <span class="time-text"><%= time %></span>
+            <% if (U.role === 'admin') { %>
+              <div class="time-actions">
+                <button class="badge danger" type="button" data-action="rename-hour" data-time="<%= time %>">ערוך שעה</button>
+                <button class="badge danger" type="button" data-action="delete-hour" data-time="<%= time %>">הסר שעה</button>
+              </div>
+            <% } %>
+          </div>
+
+          <% cells.forEach(s => {
+               const sid = Number(s.slot_id || -1);
+               const hasUser = !!s.user_id;
+               const adminLocked = !!s.admin_lock;
+               const taken = hasUser || adminLocked;
+               const mine  = hasUser && U.id && (s.user_id === U.id);
+               const active = !!s.active;
+               const showName = taken ? (s.label || '') : '';
+               const bg = taken ? '#86efac' : (s.color || '#e0f2fe');
+               const disabledForUser = (!active || (taken && !mine));
+          %>
+            <div class="cell <%= mine ? 'mine' : '' %> <%= disabledForUser ? 'disabled' : '' %>"
+                 style="background:<%= bg %>"
+                 data-slot-id="<%= sid %>"
+                 data-taken="<%= taken ? '1' : '0' %>"
+                 data-mine="<%= mine ? '1' : '0' %>"
+                 data-active="<%= active ? '1' : '0' %>">
+
+              <div class="slot-text"><%= showName %></div>
+              <div class="badge state">
+                <% if (mine) { %>שלך (הסר)
+                <% } else if (!active) { %>סגור
+                <% } else if (taken) { %>תפוס
+                <% } else { %>פנוי<% } %>
+              </div>
+
+              <% if (U.role === 'admin' && sid > 0) { %>
+                <div class="admin-actions">
+                  <button class="badge" type="button" data-action="clear">נקה</button>
+                  <% if (active) { %>
+                    <button class="badge danger" type="button" data-action="close">סגור</button>
+                  <% } else { %>
+                    <button class="badge success" type="button" data-action="open">פתח</button>
+                  <% } %>
+                  <button class="badge info" type="button" data-action="label">ערוך שם</button>
+                </div>
+              <% } %>
+            </div>
+          <% }) %>
+        <% }) %>
+      </div>
     </div>
   </div>
 
-  <% /* קיבוץ משבצות לפי שעה (לוגיקת EJS בלבד, אין שינוי ויזואלי) */ %>
-  <% const byTime = {}; for (const s of (slots || [])) { (byTime[s.time_label] || (byTime[s.time_label]=[])).push(s); } %>
-  <% const times = Object.keys(byTime).sort(); %>
-
-  <table class="grid">
-    <thead>
-      <tr>
-        <th>שעה</th>
-        <th>עמודה 1</th>
-        <th>עמודה 2</th>
-        <th>עמודה 3</th>
-        <th>עמודה 4</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% times.forEach(function (tl) { 
-           const row = byTime[tl]; 
-           const byCol = {}; row.forEach(s => byCol[s.col_index] = s);
-      %>
-      <tr data-time="<%= tl %>">
-        <th>
-          <div class="hour">
-            <span class="time-label"><%= tl %></span>
-            <% if (user && user.role === 'admin') { %>
-              <!-- כפתורי אדמין לשעה עצמה (בלתי-נראה לשאר) -->
-              <button class="badge" data-action="rename-hour" data-time="<%= tl %>">ערוך שעה</button>
-              <button class="badge danger" data-action="delete-hour" data-time="<%= tl %>">הסר שעה</button>
-            <% } %>
-          </div>
-        </th>
-
-        <% for (let c=1; c<=4; c++) { 
-             const s = byCol[c];
-             if (s) { %>
-          <td>
-            <!-- לא משנים את המבנה הויזואלי; רק מוסיפים data-slot-id כדי שלחיצה תעבוד -->
-            <div class="slot" data-slot-id="<%= s.id %>" data-time="<%= tl %>">
-              <div class="label" style="background:<%= s.color || '#e5e7eb' %>">
-                <%= (s.label || '').trim() %>
-              </div>
-
-              <% if (user && user.role === 'admin') { %>
-                <!-- פקדי אדמין בתוך המשבצת (כמו שהיה, בלי שינוי סגנון) -->
-                <label class="inline">
-                  <input type="checkbox"
-                         data-slot-id="<%= s.id %>"
-                         data-action="toggle-active"
-                         <%= s.active ? 'checked' : '' %> >
-                  פתוחה
-                </label>
-                <button class="badge" data-action="set-label" data-slot-id="<%= s.id %>">קבע תווית</button>
-                <button class="badge gray" data-action="clear-slot" data-slot-id="<%= s.id %>">סגור/נקה</button>
-              <% } %>
-            </div>
-          </td>
-        <% } else { %>
-          <td><div class="slot muted">—</div></td>
-        <% } } %>
-      </tr>
-      <% }) %>
-    </tbody>
-  </table>
-
-  <!-- מאפשר חלופה אם ה-meta לא נקרא -->
-  <script>window.CSRF_TOKEN = "<%= csrfToken %>";</script>
+  <script>window.CSRF_TOKEN = "<%= CSRF %>"</script>
+  <script src="/socket.io/socket.io.js"></script>
   <script src="/dashboard.js" defer></script>
 </body>
 </html>
