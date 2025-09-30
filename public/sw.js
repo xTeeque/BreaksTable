@@ -1,38 +1,65 @@
-/* public/sw.js */
-/* Service Worker להתראות Push */
+// public/sw.js
+const CACHE = "bt-v6";
 
-self.addEventListener('push', (event) => {
-  let data = {};
-  try { data = event.data ? event.data.json() : {}; } catch (e) {}
+// קבצים שכדאי לקבע במטמון (ללא dashboard.js)
+const PRECACHE = [
+  "/",
+  "/style.css",
+  "/push.js"
+];
 
-  const title = data.title || 'תזכורת';
-  const body  = data.body  || '';
-  const icon  = data.icon  || '/icon-192.png'; // אם יש לכם אייקון
-  const url   = data.url   || '/';
-
+self.addEventListener("install", (event) => {
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body, icon, data: { url },
-      badge: '/icon-badge.png', // אופציונלי
-      dir: 'rtl',
-      lang: 'he-IL',
-      vibrate: [100, 50, 100],
-      tag: data.tag || 'breaks-reminder',
-      renotify: false,
-      requireInteraction: false,
-    })
+    caches.open(CACHE).then((cache) => cache.addAll(PRECACHE))
   );
+  self.skipWaiting();
 });
 
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || '/';
+self.addEventListener("activate", (event) => {
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      for (const client of clientList) {
-        if ('focus' in client) { client.navigate(url); return client.focus(); }
-      }
-      if (clients.openWindow) { return clients.openWindow(url); }
-    })
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+    )
   );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+
+  // לא ליירט את dashboard.js ואת socket.io
+  if (url.pathname === "/dashboard.js" || url.pathname.startsWith("/socket.io/")) {
+    return; // ברירת מחדל: רשת
+  }
+
+  // ניווטי דפים -> רשת תחילה
+  if (event.request.mode === "navigate") {
+    event.respondWith((async () => {
+      try {
+        const fresh = await fetch(event.request);
+        return fresh;
+      } catch {
+        const cache = await caches.open(CACHE);
+        const fallback = await cache.match("/");
+        return fallback || Response.error();
+      }
+    })());
+    return;
+  }
+
+  // סטטיים אחרים -> cache תחילה עם נפילה לרשת
+  if (PRECACHE.includes(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const cached = await cache.match(event.request);
+      if (cached) return cached;
+      try {
+        const fresh = await fetch(event.request);
+        cache.put(event.request, fresh.clone());
+        return fresh;
+      } catch {
+        return Response.error();
+      }
+    })());
+  }
 });
