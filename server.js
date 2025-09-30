@@ -54,7 +54,6 @@ const app = express();
 const httpServer = httpPkg.createServer(app);
 const io = new SocketIOServer(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
-// broadcast helper
 async function broadcastSlots() {
   try { io.emit("slots:update", { at: Date.now() }); } catch (e) { console.error("broadcast error:", e); }
 }
@@ -158,7 +157,7 @@ app.get("/profile", requireAuth, (req, res) => {
   res.render("profile", {
     csrfToken: req.csrfToken(),
     user,
-    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || ""   // <-- כאן המפתח עובר לעמוד
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || ""
   });
 });
 
@@ -284,7 +283,7 @@ app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, r
 app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, res) => {
   const from = (req.body.from ?? "").toString().trim();
   const to   = (req.body.to ?? "").toString().trim();
-  if (!/^[0-2]\d:\d{2}$/.test(from) || !/^[0-2]\d:\d{2}$/.test(to)) return res.status(400).send("HH:MM required");
+  if (!/^[0-2]\d:\d{2}$/.test(from) || !/^[0-2]\d{2}$/.test(to)) return res.status(400).send("HH:MM required");
   try {
     await renameHour(from, to);
     await broadcastSlots();
@@ -303,12 +302,10 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
 
 /* ------------------ Web Push API ------------------ */
 
-// להחזיר את ה־public key גם כ־JSON (fallback לקליינט)
 app.get("/push/key", requireAuth, (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || "" });
 });
 
-// רישום מנוי
 app.post("/push/subscribe", requireAuth, async (req, res) => {
   const sub = {
     endpoint: req.body?.endpoint,
@@ -322,7 +319,6 @@ app.post("/push/subscribe", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ביטול מנוי
 app.post("/push/unsubscribe", requireAuth, async (req, res) => {
   const endpoint = req.body?.endpoint;
   if (!endpoint) return res.status(400).send("Missing endpoint");
