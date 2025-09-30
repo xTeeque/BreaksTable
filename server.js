@@ -28,7 +28,6 @@ import {
   createHour,
   renameHour,
   deleteHour,
-  updateUserPhone,
 } from "./src/db.js";
 
 import {
@@ -38,6 +37,14 @@ import {
   safeLower,
   safeString,
 } from "./src/middleware/auth.js";
+
+import {
+  savePushSubscription,
+  removePushSubscription,
+  findDueReminders,
+  markReminderSent,
+  sendPushToUser,
+} from "./src/push.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -49,34 +56,6 @@ const io = new SocketIOServer(httpServer, { cors: { origin: "*", methods: ["GET"
 
 async function broadcastSlots() {
   try { io.emit("slots:update", { at: Date.now() }); } catch (e) { console.error("broadcast error:", e); }
-}
-
-/* ---------- נירמול טלפון ישראלי -> E.164 ---------- */
-function normalizeILPhone(input) {
-  if (input == null) return null;
-  let s = String(input).trim();
-  if (s === "") return null;
-  s = s.replace(/[^\d+]/g, "");
-  if (s.startsWith("+")) {
-    if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
-    return s;
-  }
-  if (s.startsWith("972")) {
-    s = "+" + s;
-    if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
-    return s;
-  }
-  s = s.replace(/^0+/, "");
-  s = "+972" + s;
-  if (!/^\+\d{8,15}$/.test(s)) throw new Error("מספר טלפון לא תקין");
-  return s;
-}
-function e164ToLocalIL(e164) {
-  if (!e164) return "";
-  let s = String(e164).replace(/[^\d]/g, "");
-  if (s.startsWith("972")) s = "0" + s.slice(3);
-  else if (!s.startsWith("0") && /^\d+$/.test(s)) s = "0" + s;
-  return s;
 }
 
 /* ---------- אבטחה/פרסרים/לוגים ---------- */
@@ -135,7 +114,7 @@ app.post("/login",
 
     req.session.user = {
       id: user.id, email: user.email, role: user.role,
-      first_name: user.first_name, last_name: user.last_name, phone: user.phone
+      first_name: user.first_name, last_name: user.last_name
     };
     res.redirect("/");
   }
@@ -150,7 +129,6 @@ app.post("/register",
   body("password").isString().isLength({ min: 6 }),
   body("first_name").optional().isString(),
   body("last_name").optional().isString(),
-  body("phone").optional().isString(),
   async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -163,15 +141,8 @@ app.post("/register",
     const first = safeString(req.body.first_name);
     const last  = safeString(req.body.last_name);
 
-    let phone = safeString(req.body.phone);
     try {
-      phone = phone ? normalizeILPhone(phone) : null;
-    } catch (e) {
-      return res.status(400).render("register", { csrfToken: req.csrfToken(), error: e.message || "מספר טלפון לא תקין" });
-    }
-
-    try {
-      await insertUser({ email, password_hash: passHash, first_name: first, last_name: last, phone });
+      await insertUser({ email, password_hash: passHash, first_name: first, last_name: last });
       res.redirect("/login");
     } catch (e) {
       console.error(e);
@@ -180,37 +151,17 @@ app.post("/register",
   }
 );
 
-/* ---- Profile ---- */
+/* ---- Profile: ניהול התראות דפדפן ---- */
 app.get("/profile", requireAuth, (req, res) => {
-  const user = { ...req.session.user, phone_local: e164ToLocalIL(req.session.user.phone) };
-  res.render("profile", { csrfToken: req.csrfToken(), user });
+  const user = { ...req.session.user };
+  res.render("profile", {
+    csrfToken: req.csrfToken(),
+    user,
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || ""
+  });
 });
-app.post("/profile",
-  requireAuth,
-  body("phone").optional().isString(),
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      const msg = errors.array()[0]?.msg || "Invalid payload";
-      const user = { ...req.session.user, phone_local: e164ToLocalIL(req.session.user.phone) };
-      return res.status(400).render("profile", { csrfToken: req.csrfToken(), user, error: msg });
-    }
-    const raw = safeString(req.body.phone);
-    let normalized = null;
-    try {
-      normalized = raw ? normalizeILPhone(raw) : null;
-    } catch (e) {
-      const user = { ...req.session.user, phone_local: raw };
-      return res.status(400).render("profile", { csrfToken: req.csrfToken(), user, error: e.message || "מספר טלפון לא תקין" });
-    }
-    await updateUserPhone(req.session.user.id, normalized);
-    req.session.user.phone = normalized;
-    const user = { ...req.session.user, phone_local: e164ToLocalIL(normalized) };
-    res.render("profile", { csrfToken: req.csrfToken(), user, message: "עודכן בהצלחה" });
-  }
-);
 
-/* ---- Forgot / Reset WITHOUT email token ---- */
+/* ------------------ Forgot / Reset ללא מייל ------------------ */
 app.get("/forgot", (req, res) => {
   res.render("forgot", { csrfToken: req.csrfToken() });
 });
@@ -225,7 +176,6 @@ app.post("/forgot", body("email").isEmail(), async (req, res) => {
     return res.redirect("/reset");
   }
 
-  // הודעה גנרית (לא חושפים אם קיים/לא)
   res.render("forgot", {
     csrfToken: req.csrfToken(),
     message: "אם קיים חשבון עם האימייל שהוזן — נשלחה הודעת איפוס."
@@ -297,7 +247,7 @@ app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async
   res.json({ ok: true });
 });
 
-// שינוי שם ע"י אדמין: מסיר משתמש קודם, נועל את התא, מציג שם שנבחר וצובע ירוק
+// שינוי שם ע"י אדמין: מסיר משתמש קודם, נועל, מציג שם שנבחר, ירוק
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
@@ -348,6 +298,59 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
   await deleteHour(tl);
   await broadcastSlots();
   res.json({ ok: true });
+});
+
+/* ------------------ Web Push API ------------------ */
+
+// מעביר מפתח VAPID ציבורי לעמוד (אפשר גם דרך meta ב-profile)
+app.get("/push/key", requireAuth, (req, res) => {
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || "" });
+});
+
+// רישום מנוי
+app.post("/push/subscribe", requireAuth, async (req, res) => {
+  const sub = {
+    endpoint: req.body?.endpoint,
+    keys: req.body?.keys || {},
+    user_agent: req.body?.user_agent || null
+  };
+  if (!sub.endpoint || !sub.keys.p256dh || !sub.keys.auth) {
+    return res.status(400).send("Bad subscription payload");
+  }
+  await savePushSubscription(req.session.user.id, sub);
+  res.json({ ok: true });
+});
+
+// ביטול מנוי
+app.post("/push/unsubscribe", requireAuth, async (req, res) => {
+  const endpoint = req.body?.endpoint;
+  if (!endpoint) return res.status(400).send("Missing endpoint");
+  await removePushSubscription(req.session.user.id, endpoint);
+  res.json({ ok: true });
+});
+
+/* ------------------ Cron: שליחת תזכורות T-3 דקות ------------------ */
+
+app.post("/tasks/send-due-reminders", async (req, res) => {
+  const secret = req.get("x-cron-secret");
+  if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
+    return res.status(403).send("Forbidden");
+  }
+
+  const due = await findDueReminders();
+  for (const row of due) {
+    const hhmm = row.time_label;
+    const payload = {
+      title: "⏰ תזכורת: בעוד 3 דקות",
+      body:  `המשבצת שלך ל־${hhmm} מתקרבת.`,
+      url:   `${process.env.APP_BASE_URL || ""}/`,
+      tag:   `slot-${row.slot_id}-${hhmm}`
+    };
+    await sendPushToUser(row.user_id, payload);
+    await markReminderSent(row.user_id, row.slot_id, row.scheduled_for);
+  }
+
+  res.json({ ok: true, sent: due.length });
 });
 
 /* ------------------ Errors & 404 ------------------ */
