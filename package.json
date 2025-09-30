@@ -25,6 +25,7 @@
     "nanoid": "^5.0.7",
     "nodemailer": "^6.9.13",
     "pg": "^8.11.5",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "web-push": "^3.6.7"
   }
 }
