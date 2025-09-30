@@ -1,5 +1,5 @@
 /* public/push.js */
-/* עוזר בצד לקוח לרישום/ביטול מנוי Push בדפדפן */
+/* רישום/ביטול Push בדפדפן + סטטוס */
 
 (async function () {
   const $enable  = document.querySelector('[data-push-enable]');
@@ -77,6 +77,7 @@
   // סטטוס התחלתי
   try {
     if (!('Notification' in window) || !('serviceWorker' in navigator)) setStatus('דפדפן לא תומך בהתראות');
+    else if (!vapidPublicKey) setStatus('חסר VAPID_PUBLIC_KEY בצד שרת');
     else {
       const reg = await navigator.serviceWorker.getRegistration();
       const s   = reg ? await reg.pushManager.getSubscription() : null;
