@@ -1,200 +1,228 @@
 // public/dashboard.js
-// מאזין לכל הכפתורים (יוזר ואדמין) בצורה לא פולשנית ומחזיר את כל הפונקציונליות.
-// כולל השגת CSRF אוטומטית גם אם אין meta/input בדף, וריענון אחרי שינויים.
 
-(function () {
-  // -------- CSRF ----------
-  let __csrf = null;
-  function readCsrfFromDom() {
-    return (
-      (window.CSRF_TOKEN) ||
-      (document.querySelector('meta[name="csrf-token"]')?.content) ||
-      (document.querySelector('input[name="_csrf"]')?.value) ||
-      null
-    );
-  }
-  async function fetchCsrfFromForgot() {
-    try {
-      const r = await fetch("/forgot", { credentials: "same-origin" });
-      const html = await r.text();
-      const m = html.match(/name="_csrf"\s+value="([^"]+)"/);
-      return m ? m[1] : null;
-    } catch { return null; }
-  }
-  async function getCsrf() {
-    if (__csrf) return __csrf;
-    __csrf = readCsrfFromDom();
-    if (!__csrf) __csrf = await fetchCsrfFromForgot();
-    return __csrf || "";
-  }
+(() => {
+  const ROLE = (document.body.getAttribute('data-role') || 'user').toLowerCase();
+  const CSRF = (typeof window !== 'undefined' && window.CSRF_TOKEN) ? window.CSRF_TOKEN : '';
 
-  // -------- Helpers ----------
-  const HHMM = /^[0-2]\d:\d{2}$/;
+  // עוזר לוג
+  const log = (...args) => console.log('[dashboard]', ...args);
+  const err = (...args) => console.error('[dashboard]', ...args);
 
-  function qs(sel, root) { return (root || document).querySelector(sel); }
-  function qsa(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
-
-  function getSlotId(el) {
-    const c = el?.closest("[data-slot-id]");
-    const id = c?.dataset?.slotId || el?.dataset?.slotId || (el?.getAttribute?.("data-slot-id"));
-    return id ? Number(id) : null;
-  }
-  function getTimeLabel(el) {
-    if (el?.dataset?.time) return el.dataset.time;
-    const p = el?.closest("[data-time],[data-time-label]");
-    if (p) return p.dataset.time || p.dataset.timeLabel;
-    const text = (el?.closest("td,th,div")?.textContent || "").trim();
-    const m = text.match(/\b([0-2]\d:\d{2})\b/);
-    return m ? m[1] : null;
-  }
-  function promptHHMM(title, initial) {
-    const v = prompt(title || "הכנס שעה בפורמט HH:MM", initial || "");
-    if (v == null) return null;
-    const s = String(v).trim();
-    if (!HHMM.test(s)) { alert("שעה לא תקינה. פורמט חובה: HH:MM"); return null; }
-    return s;
-  }
-
-  async function apiPostForm(url, data) {
-    const token = await getCsrf();
-    const body = new URLSearchParams();
-    if (data && typeof data === "object") {
-      for (const [k, v] of Object.entries(data)) body.append(k, v == null ? "" : String(v));
+  // עוזר Fetch עם CSRF
+  async function api(path, { method = 'POST', json, headers = {} } = {}) {
+    const opts = {
+      method,
+      headers: {
+        'x-csrf-token': CSRF,
+        ...headers
+      },
+      credentials: 'same-origin'
+    };
+    if (json !== undefined) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(json);
     }
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "x-csrf-token": token },
-      body
-    });
-    if (!res.ok) throw new Error(await res.text().catch(()=>"שגיאת שרת"));
-    return res;
+    const res = await fetch(path, opts);
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* ignore */ }
+    if (!res.ok) {
+      const msg = data?.error || data?.message || text || 'Request failed';
+      throw new Error(msg);
+    }
+    return data ?? text;
   }
 
-  function reloadSoon(ms = 50) { setTimeout(() => location.reload(), ms); }
+  // עוזר לפורמט שעה
+  function isHHMM(s) {
+    return typeof s === 'string' && /^[0-2]\d:\d{2}$/.test(s.trim());
+  }
 
-  // -------- Socket.IO (אם נטען) ----------
+  // רענון אחרי פעולה
+  function refresh() {
+    // שומר על פשטות: מרענן את העמוד
+    window.location.reload();
+  }
+
+  // ----- חיבור Socket לרענון מרחוק -----
   try {
-    if (window.io && !window.__slotsIoBound) {
+    if (window.io) {
       const socket = io();
-      socket.on("slots:update", () => reloadSoon(10));
-      window.__slotsIoBound = true;
+      socket.on('connect', () => log('socket connected'));
+      socket.on('slots:update', () => {
+        log('slots:update -> refresh');
+        refresh();
+      });
     }
-  } catch {}
-
-  // -------- Handlers: User ----------
-  async function onReserve(el) {
-    // תיקון: לא מערבבים ?? ו-|| בלי סוגריים → מחשבים שלבים
-    let slotId = getSlotId(el);
-    if (!slotId) {
-      const byAttr = Number(el.getAttribute?.("data-id"));
-      slotId = byAttr || Number(el.value);
-    }
-    if (!slotId) return alert("לא נמצאה משבצת");
-    await apiPostForm(`/reserve/${slotId}`, {});
-    reloadSoon();
-  }
-  async function onUnreserve() {
-    await apiPostForm(`/unreserve`, {});
-    reloadSoon();
+  } catch (e) {
+    err('socket init failed', e);
   }
 
-  // -------- Handlers: Admin ----------
-  async function onClearSlot(el) {
-    const slotId = getSlotId(el);
-    if (!slotId) return alert("לא נמצאה משבצת");
-    await apiPostForm(`/admin/slots/${slotId}/clear`, {});
-    reloadSoon();
-  }
-  async function onToggleActive(el) {
-    const slotId = getSlotId(el);
-    if (!slotId) return alert("לא נמצאה משבצת");
-    const active = (typeof el.checked === "boolean") ? el.checked : (el.dataset.active === "true" || el.dataset.active === "1");
-    await apiPostForm(`/admin/slots/${slotId}/active`, { active: active ? "1" : "" });
-    reloadSoon();
-  }
-  async function onSetLabel(el) {
-    const slotId = getSlotId(el);
-    if (!slotId) return alert("לא נמצאה משבצת");
-    const current = (el.closest("[data-slot]")?.dataset?.label) || "";
-    const label = prompt("שם שיוצג במשבצת:", current);
-    if (label === null) return;
-    await apiPostForm(`/admin/slots/${slotId}/label`, { label: label.trim() });
-    reloadSoon();
-  }
-  async function onCleanup() {
-    if (!confirm("לאפס צבע/טקסט בכל המשבצות שאינן תפוסות?")) return;
-    await apiPostForm(`/admin/cleanup`, {});
-    reloadSoon();
-  }
-  async function onCreateHour() {
-    const tl = promptHHMM("הוסף שעה (HH:MM):", "12:50");
-    if (!tl) return;
-    await apiPostForm(`/admin/hours/create`, { time_label: tl });
-    reloadSoon();
-  }
-  async function onDeleteHour(el) {
-    const tl = getTimeLabel(el) || promptHHMM("איזו שעה להסיר? (HH:MM)");
-    if (!tl) return;
-    if (!confirm(`להסיר את השעה ${tl}?`)) return;
-    await apiPostForm(`/admin/hours/delete`, { time_label: tl });
-    reloadSoon();
-  }
-  async function onRenameHour(el) {
-    let from = getTimeLabel(el);
-    if (!from) from = promptHHMM("איזו שעה לערוך? (HH:MM)");
-    if (!from) return;
-    const to = promptHHMM(`שעה חדשה עבור ${from} (HH:MM):`, from);
-    if (!to) return;
-    await apiPostForm(`/admin/hours/rename`, { from, to });
-    reloadSoon();
+  // ----- פעולות משתמש (לא אדמין): בחירת/ביטול משבצת -----
+  async function onUserCellClick(cell, ev) {
+    // למנוע קליקים על כפתורי אדמין בתוך התא
+    if (ev.target.closest('.admin-actions') || ev.target.matches('button, .badge')) return;
+
+    const taken = cell.getAttribute('data-taken') === '1';
+    const mine = cell.getAttribute('data-mine') === '1';
+    const active = cell.getAttribute('data-active') === '1';
+    const slotId = Number(cell.getAttribute('data-slot-id') || -1);
+    if (slotId <= 0) return;
+
+    try {
+      if (mine) {
+        await api('/unreserve', { method: 'POST' });
+      } else {
+        if (!active) throw new Error('המשבצת סגורה');
+        if (taken) throw new Error('המשבצת תפוסה');
+        await api(`/reserve/${slotId}`, { method: 'POST' });
+      }
+      refresh();
+    } catch (e) {
+      alert(e.message || 'שגיאה בביצוע הפעולה');
+      err(e);
+    }
   }
 
-  // -------- Delegation ----------
-  document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("button, a, input[type=checkbox], [data-slot-id]");
-    if (!el) return;
+  // ----- פעולות אדמין על תא בודד -----
+  async function onAdminActionClick(btn) {
+    const action = btn.getAttribute('data-action');
+    const cell = btn.closest('.cell');
+    if (!cell) return;
+    const slotId = Number(cell.getAttribute('data-slot-id') || -1);
+    if (slotId <= 0 && !['rename-hour','delete-hour'].includes(action)) return;
 
-    // אדמין
-    if (el.matches('[data-action="cleanup"], [data-cleanup-all], .btn-cleanup-all')) {
-      ev.preventDefault(); onCleanup(); return;
+    try {
+      if (action === 'clear') {
+        await api(`/admin/slots/${slotId}/clear`, { method: 'POST' });
+      } else if (action === 'close') {
+        await api(`/admin/slots/${slotId}/active`, { method: 'POST', json: { active: false } });
+      } else if (action === 'open') {
+        await api(`/admin/slots/${slotId}/active`, { method: 'POST', json: { active: true } });
+      } else if (action === 'label') {
+        const current = (cell.querySelector('.slot-text')?.textContent || '').trim();
+        const label = prompt('שם שיוצג למשבצת (ריק כדי להסיר):', current);
+        if (label === null) return; // ביטול
+        await api(`/admin/slots/${slotId}/label`, { method: 'POST', json: { label: String(label).trim() } });
+      } else {
+        log('unknown admin slot action', action);
+        return;
+      }
+      refresh();
+    } catch (e) {
+      alert(e.message || 'שגיאה בביצוע הפעולה');
+      err(e);
     }
-    if (el.matches('[data-action="create-hour"], [data-create-hour], .btn-create-hour')) {
-      ev.preventDefault(); onCreateHour(); return;
+  }
+
+  // ----- פעולות אדמין על שעות (header של שעה) -----
+  async function onHourAction(btn) {
+    const action = btn.getAttribute('data-action'); // rename-hour / delete-hour
+    const time = (btn.getAttribute('data-time') || '').trim();
+    if (!isHHMM(time)) {
+      alert('שעת מקור לא חוקית');
+      return;
     }
-    if (el.matches('[data-action="delete-hour"], [data-delete-hour], .btn-delete-hour')) {
-      ev.preventDefault(); onDeleteHour(el); return;
+    try {
+      if (action === 'rename-hour') {
+        const to = prompt('שעה חדשה (HH:MM):', time);
+        if (to === null) return;
+        if (!isHHMM(to)) throw new Error('HH:MM required');
+        await api('/admin/hours/rename', { method: 'POST', json: { from: time, to } });
+      } else if (action === 'delete-hour') {
+        if (!confirm(`למחוק את השעה ${time}?`)) return;
+        await api('/admin/hours/delete', { method: 'POST', json: { time_label: time } });
+      } else {
+        log('unknown hour action', action);
+        return;
+      }
+      refresh();
+    } catch (e) {
+      alert(e.message || 'שגיאה בביצוע הפעולה');
+      err(e);
     }
-    if (el.matches('[data-action="rename-hour"], [data-rename-hour], .btn-rename-hour')) {
-      ev.preventDefault(); onRenameHour(el); return;
-    }
-    if (el.matches('[data-action="clear-slot"], [data-clear-slot], .btn-clear-slot')) {
-      ev.preventDefault(); onClearSlot(el); return;
-    }
-    if (el.matches('[data-action="toggle-active"], [data-toggle-active], .btn-toggle-active, input[type=checkbox][data-slot-id]')) {
-      ev.preventDefault(); onToggleActive(el); return;
-    }
-    if (el.matches('[data-action="set-label"], [data-set-label], .btn-set-label')) {
-      ev.preventDefault(); onSetLabel(el); return;
+  }
+
+  // ----- כפתורי טופ-בר של אדמין -----
+  async function wireTopbarAdmin() {
+    if (ROLE !== 'admin') return;
+
+    const btnAdd = document.getElementById('btn-add-hour');
+    if (btnAdd) {
+      btnAdd.addEventListener('click', async () => {
+        const def = new Date(Date.now() + 3 * 60000).toLocaleTimeString('he-IL', { hour12: false, hour: '2-digit', minute: '2-digit' });
+        const hhmm = prompt('הכנס שעה בפורמט HH:MM', def);
+        if (hhmm === null) return;
+        if (!isHHMM(hhmm)) { alert('HH:MM required'); return; }
+        try {
+          await api('/admin/hours/create', { method: 'POST', json: { time_label: hhmm } });
+          refresh();
+        } catch (e) {
+          alert(e.message || 'שגיאה ביצירת שעה');
+          err(e);
+        }
+      });
     }
 
-    // יוזר
-    if (el.matches('[data-action="unreserve"], [data-unreserve], .btn-unreserve')) {
-      ev.preventDefault(); onUnreserve(); return;
+    const btnClean = document.getElementById('btn-clear-all');
+    if (btnClean) {
+      btnClean.addEventListener('click', async () => {
+        if (!confirm('לנקות את כל המשבצות הפנויות?')) return;
+        try {
+          await api('/admin/cleanup', { method: 'POST' });
+          refresh();
+        } catch (e) {
+          alert(`נכשל ניקוי כללי: ${e.message || e}`);
+          err(e);
+        }
+      });
     }
-    if (
-      el.matches('[data-action="reserve"], [data-reserve], .btn-reserve') ||
-      (el.hasAttribute('data-slot-id') && !el.closest('[data-admin], .admin-controls'))
-    ) {
-      ev.preventDefault(); onReserve(el); return;
-    }
-  });
+  }
 
-  // שינוי ישיר של checkbox (אם לא נתפס ב-click)
-  document.addEventListener("change", (ev) => {
-    const el = ev.target;
-    if (el.matches('input[type=checkbox][data-slot-id], [data-action="toggle-active"]')) {
-      onToggleActive(el);
-    }
-  });
+  // ----- האזנה מרכזית לגריד -----
+  function wireGrid() {
+    const grid = document.getElementById('grid');
+    if (!grid) return;
 
+    grid.addEventListener('click', (ev) => {
+      const target = ev.target;
+
+      // פעולות על header של שעה (ערוך/הסר שעה)
+      const hourBtn = target.closest('.time-actions button');
+      if (hourBtn && ROLE === 'admin') {
+        ev.preventDefault();
+        onHourAction(hourBtn);
+        return;
+      }
+
+      // פעולות אדמין על תא
+      const adminBtn = target.closest('.admin-actions button');
+      if (adminBtn && ROLE === 'admin') {
+        ev.preventDefault();
+        onAdminActionClick(adminBtn);
+        return;
+      }
+
+      // פעולות משתמש על תא
+      const cell = target.closest('.cell');
+      if (cell && ROLE !== 'admin') {
+        ev.preventDefault();
+        onUserCellClick(cell, ev);
+        return;
+      }
+    });
+  }
+
+  // ----- אתחול -----
+  function init() {
+    wireTopbarAdmin();
+    wireGrid();
+    log('ready; role=', ROLE);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();
