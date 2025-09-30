@@ -1,21 +1,15 @@
 // public/dashboard.js
-
 (() => {
   const ROLE = (document.body.getAttribute('data-role') || 'user').toLowerCase();
   const CSRF = (typeof window !== 'undefined' && window.CSRF_TOKEN) ? window.CSRF_TOKEN : '';
 
-  // עוזר לוג
-  const log = (...args) => console.log('[dashboard]', ...args);
-  const err = (...args) => console.error('[dashboard]', ...args);
+  const log = (...a) => console.log('[dashboard]', ...a);
+  const err = (...a) => console.error('[dashboard]', ...a);
 
-  // עוזר Fetch עם CSRF
   async function api(path, { method = 'POST', json, headers = {} } = {}) {
     const opts = {
       method,
-      headers: {
-        'x-csrf-token': CSRF,
-        ...headers
-      },
+      headers: { 'x-csrf-token': CSRF, ...headers },
       credentials: 'same-origin'
     };
     if (json !== undefined) {
@@ -25,46 +19,37 @@
     const res = await fetch(path, opts);
     const text = await res.text();
     let data = null;
-    try { data = JSON.parse(text); } catch { /* ignore */ }
-    if (!res.ok) {
-      const msg = data?.error || data?.message || text || 'Request failed';
-      throw new Error(msg);
-    }
+    try { data = JSON.parse(text); } catch {}
+    if (!res.ok) throw new Error(data?.error || data?.message || text || 'Request failed');
     return data ?? text;
   }
 
-  // עוזר לפורמט שעה
-  function isHHMM(s) {
-    return typeof s === 'string' && /^[0-2]\d:\d{2}$/.test(s.trim());
-  }
+  const isHHMM = s => typeof s === 'string' && /^[0-2]\d:\d{2}$/.test(s.trim());
+  const refresh = () => window.location.reload();
 
-  // רענון אחרי פעולה
-  function refresh() {
-    // שומר על פשטות: מרענן את העמוד
-    window.location.reload();
-  }
-
-  // ----- חיבור Socket לרענון מרחוק -----
+  // Socket לרענון
   try {
     if (window.io) {
       const socket = io();
       socket.on('connect', () => log('socket connected'));
-      socket.on('slots:update', () => {
-        log('slots:update -> refresh');
-        refresh();
-      });
+      socket.on('slots:update', () => { log('slots:update'); refresh(); });
     }
-  } catch (e) {
-    err('socket init failed', e);
+  } catch (e) { err('socket init failed', e); }
+
+  // ❗ אם אדמין — להסיר class שחוסם קליקים (ייתכן ש-CSS שם pointer-events:none)
+  function unblockAdminClicks() {
+    if (ROLE === 'admin') {
+      document.querySelectorAll('.cell.disabled').forEach(el => el.classList.remove('disabled'));
+    }
   }
 
-  // ----- פעולות משתמש (לא אדמין): בחירת/ביטול משבצת -----
+  // פעולות משתמש (קליק על תא)
   async function onUserCellClick(cell, ev) {
-    // למנוע קליקים על כפתורי אדמין בתוך התא
-    if (ev.target.closest('.admin-actions') || ev.target.matches('button, .badge')) return;
+    // אם לוחצים על כפתורי אדמין/כותרת שעה — להתעלם
+    if (ev.target.closest('.admin-actions') || ev.target.closest('.time-actions')) return;
 
-    const taken = cell.getAttribute('data-taken') === '1';
-    const mine = cell.getAttribute('data-mine') === '1';
+    const taken  = cell.getAttribute('data-taken') === '1';
+    const mine   = cell.getAttribute('data-mine') === '1';
     const active = cell.getAttribute('data-active') === '1';
     const slotId = Number(cell.getAttribute('data-slot-id') || -1);
     if (slotId <= 0) return;
@@ -74,7 +59,7 @@
         await api('/unreserve', { method: 'POST' });
       } else {
         if (!active) throw new Error('המשבצת סגורה');
-        if (taken) throw new Error('המשבצת תפוסה');
+        if (taken)  throw new Error('המשבצת תפוסה');
         await api(`/reserve/${slotId}`, { method: 'POST' });
       }
       refresh();
@@ -84,7 +69,7 @@
     }
   }
 
-  // ----- פעולות אדמין על תא בודד -----
+  // פעולות אדמין על תא (נקה/סגור/פתח/ערוך שם)
   async function onAdminActionClick(btn) {
     const action = btn.getAttribute('data-action');
     const cell = btn.closest('.cell');
@@ -102,7 +87,7 @@
       } else if (action === 'label') {
         const current = (cell.querySelector('.slot-text')?.textContent || '').trim();
         const label = prompt('שם שיוצג למשבצת (ריק כדי להסיר):', current);
-        if (label === null) return; // ביטול
+        if (label === null) return;
         await api(`/admin/slots/${slotId}/label`, { method: 'POST', json: { label: String(label).trim() } });
       } else {
         log('unknown admin slot action', action);
@@ -115,14 +100,11 @@
     }
   }
 
-  // ----- פעולות אדמין על שעות (header של שעה) -----
+  // פעולות על שעות (עריכת שעה/הסרה מכותרת השעה)
   async function onHourAction(btn) {
     const action = btn.getAttribute('data-action'); // rename-hour / delete-hour
     const time = (btn.getAttribute('data-time') || '').trim();
-    if (!isHHMM(time)) {
-      alert('שעת מקור לא חוקית');
-      return;
-    }
+    if (!isHHMM(time)) { alert('שעת מקור לא חוקית'); return; }
     try {
       if (action === 'rename-hour') {
         const to = prompt('שעה חדשה (HH:MM):', time);
@@ -132,9 +114,6 @@
       } else if (action === 'delete-hour') {
         if (!confirm(`למחוק את השעה ${time}?`)) return;
         await api('/admin/hours/delete', { method: 'POST', json: { time_label: time } });
-      } else {
-        log('unknown hour action', action);
-        return;
       }
       refresh();
     } catch (e) {
@@ -143,8 +122,8 @@
     }
   }
 
-  // ----- כפתורי טופ-בר של אדמין -----
-  async function wireTopbarAdmin() {
+  // כפתורי טופ-בר (הוספת שעה / ניקוי כללי)
+  function wireTopbarAdmin() {
     if (ROLE !== 'admin') return;
 
     const btnAdd = document.getElementById('btn-add-hour');
@@ -157,10 +136,7 @@
         try {
           await api('/admin/hours/create', { method: 'POST', json: { time_label: hhmm } });
           refresh();
-        } catch (e) {
-          alert(e.message || 'שגיאה ביצירת שעה');
-          err(e);
-        }
+        } catch (e) { alert(e.message || 'שגיאה ביצירת שעה'); err(e); }
       });
     }
 
@@ -179,7 +155,7 @@
     }
   }
 
-  // ----- האזנה מרכזית לגריד -----
+  // האזנה לכל הגריד
   function wireGrid() {
     const grid = document.getElementById('grid');
     if (!grid) return;
@@ -187,7 +163,7 @@
     grid.addEventListener('click', (ev) => {
       const target = ev.target;
 
-      // פעולות על header של שעה (ערוך/הסר שעה)
+      // כפתורי שעה (header)
       const hourBtn = target.closest('.time-actions button');
       if (hourBtn && ROLE === 'admin') {
         ev.preventDefault();
@@ -195,7 +171,7 @@
         return;
       }
 
-      // פעולות אדמין על תא
+      // כפתורי אדמין בתוך תא
       const adminBtn = target.closest('.admin-actions button');
       if (adminBtn && ROLE === 'admin') {
         ev.preventDefault();
@@ -203,9 +179,9 @@
         return;
       }
 
-      // פעולות משתמש על תא
+      // ❗ קליק על תא: לא רק למשתמש — גם לאדמין מותר לתפוס/לשחרר
       const cell = target.closest('.cell');
-      if (cell && ROLE !== 'admin') {
+      if (cell) {
         ev.preventDefault();
         onUserCellClick(cell, ev);
         return;
@@ -213,16 +189,12 @@
     });
   }
 
-  // ----- אתחול -----
   function init() {
+    unblockAdminClicks();
     wireTopbarAdmin();
     wireGrid();
     log('ready; role=', ROLE);
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
