@@ -36,7 +36,7 @@
 
   function getSlotId(el) {
     const c = el?.closest("[data-slot-id]");
-    const id = c?.dataset?.slotId || el?.dataset?.slotId || el?.getAttribute?.("data-slot-id");
+    const id = c?.dataset?.slotId || el?.dataset?.slotId || (el?.getAttribute?.("data-slot-id"));
     return id ? Number(id) : null;
   }
   function getTimeLabel(el) {
@@ -83,7 +83,12 @@
 
   // -------- Handlers: User ----------
   async function onReserve(el) {
-    const slotId = getSlotId(el) ?? Number(el.getAttribute("data-id")) || Number(el.value);
+    // תיקון: לא מערבבים ?? ו-|| בלי סוגריים → מחשבים שלבים
+    let slotId = getSlotId(el);
+    if (!slotId) {
+      const byAttr = Number(el.getAttribute?.("data-id"));
+      slotId = byAttr || Number(el.value);
+    }
     if (!slotId) return alert("לא נמצאה משבצת");
     await apiPostForm(`/reserve/${slotId}`, {});
     reloadSoon();
