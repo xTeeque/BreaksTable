@@ -68,8 +68,7 @@ app.use(morgan("dev"));
 /* ---------- סטטי ---------- */
 app.use(express.static(path.join(__dirname, "public")));
 
-// ✳️ הגשה מפורשת של dashboard.js (ועוקף SW)
-// אם יש לך גם public/push.js, אפשר לפתוח דומה:
+// הגשה מפורשת ל-js כדי לעקוף cache ישן/‏SW
 app.get("/dashboard.js", (_req, res) => {
   res.type("application/javascript");
   res.set("Cache-Control", "no-cache");
@@ -92,7 +91,7 @@ app.use(session({
     httpOnly: true,
     sameSite: "lax",
     secure: !!process.env.COOKIE_SECURE,
-    maxAge: 1000 * 60 * 60 * 24 * 14, // 14 ימים
+    maxAge: 1000 * 60 * 60 * 24 * 14,
   },
 }));
 
@@ -113,11 +112,9 @@ function cronAuthorized(req) {
 }
 
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
-
 app.get("/tasks/ping", (req, res) => {
   res.json({ ok: true, route: "/tasks/ping", hasEnvCronSecret: !!process.env.CRON_SECRET });
 });
-
 app.all("/tasks/send-due-reminders", async (req, res) => {
   if (!cronAuthorized(req)) {
     const provided = getProvidedCronSecret(req);
@@ -129,7 +126,6 @@ app.all("/tasks/send-due-reminders", async (req, res) => {
     });
     return res.status(403).send("Forbidden");
   }
-
   try {
     const due = await findDueReminders();
     for (const row of due) {
@@ -160,18 +156,15 @@ app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 
 /* ------------------ Pages ------------------ */
-
 app.get("/", requireAuth, async (req, res, next) => {
   try {
     const slots = await getSlotsWithReservations();
     res.render("dashboard", { slots, user: req.session.user, csrfToken: req.csrfToken() });
   } catch (e) { next(e); }
 });
-
 app.get("/dashboard", requireAuth, (req, res) => res.redirect("/"));
 
 app.get("/login", (req, res) => res.render("login", { csrfToken: req.csrfToken() }));
-
 app.post("/login",
   body("email").isEmail(),
   body("password").isString().isLength({ min: 1 }),
@@ -180,18 +173,15 @@ app.post("/login",
     if (!errors.isEmpty()) {
       return res.status(400).render("login", { csrfToken: req.csrfToken(), error: "Invalid payload" });
     }
-
     const email = safeLower(req.body.email);
     const user = await userByEmail(email);
     if (!user) {
       return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "User not found" });
     }
-
     const ok = await bcrypt.compare(String(req.body.password), user.password_hash);
     if (!ok) {
       return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "Wrong password" });
     }
-
     req.session.user = {
       id: user.id, email: user.email, role: user.role,
       first_name: user.first_name, last_name: user.last_name
@@ -199,11 +189,9 @@ app.post("/login",
     res.redirect("/");
   }
 );
-
 app.post("/logout", (req, res) => { req.session.destroy(() => res.redirect("/login")); });
 
 app.get("/register", (req, res) => res.render("register", { csrfToken: req.csrfToken() }));
-
 app.post("/register",
   body("email").isEmail(),
   body("password").isString().isLength({ min: 6 }),
@@ -215,12 +203,10 @@ app.post("/register",
       const msg = errors.array()[0]?.msg || "Invalid payload";
       return res.status(400).render("register", { csrfToken: req.csrfToken(), error: msg });
     }
-
     const email = safeLower(req.body.email);
     const passHash = await bcrypt.hash(String(req.body.password), 10);
     const first = safeString(req.body.first_name);
     const last  = safeString(req.body.last_name);
-
     try {
       await insertUser({ email, password_hash: passHash, first_name: first, last_name: last });
       res.redirect("/login");
@@ -245,30 +231,25 @@ app.get("/profile", requireAuth, (req, res) => {
 app.get("/forgot", (req, res) => {
   res.render("forgot", { csrfToken: req.csrfToken() });
 });
-
 app.post("/forgot", body("email").isEmail(), async (req, res) => {
   const email = safeLower(req.body.email);
   const user = await userByEmail(email);
-
   if (user) {
     req.session.resetUserId = user.id;
-    req.session.resetUntil = Date.now() + (60 * 60 * 1000); // שעה
+    req.session.resetUntil = Date.now() + (60 * 60 * 1000);
     return res.redirect("/reset");
   }
-
   res.render("forgot", {
     csrfToken: req.csrfToken(),
     message: "אם קיים חשבון עם האימייל שהוזן — נשלחה הודעת איפוס."
   });
 });
-
 app.get("/reset", (req, res) => {
   if (!req.session.resetUserId || !req.session.resetUntil || Date.now() > req.session.resetUntil) {
     return res.status(400).render("forgot", { csrfToken: req.csrfToken(), error: "קישור איפוס לא תקף או שפג תוקפו. נסו שוב." });
   }
   res.render("reset", { csrfToken: req.csrfToken() });
 });
-
 app.post("/reset",
   body("password").isString().isLength({ min: 6 }),
   async (req, res) => {
@@ -279,20 +260,16 @@ app.post("/reset",
     if (!errors.isEmpty()) {
       return res.status(400).render("reset", { csrfToken: req.csrfToken(), error: "סיסמה חייבת להיות באורך 6 תווים ומעלה" });
     }
-
     const userId = req.session.resetUserId;
     const passHash = await bcrypt.hash(String(req.body.password), 10);
     await updateUserPassword(userId, passHash);
-
     delete req.session.resetUserId;
     delete req.session.resetUntil;
-
     res.redirect("/login");
   }
 );
 
 /* ------------------ User actions ------------------ */
-
 app.post("/reserve/:slotId", requireAuth, async (req, res) => {
   try {
     await reserveSlot(req.session.user.id, Number(req.params.slotId));
@@ -303,7 +280,6 @@ app.post("/reserve/:slotId", requireAuth, async (req, res) => {
     res.status(409).send(msg);
   }
 });
-
 app.post("/unreserve", requireAuth, async (req, res) => {
   await clearUserReservation(req.session.user.id);
   await broadcastSlots();
@@ -311,32 +287,35 @@ app.post("/unreserve", requireAuth, async (req, res) => {
 });
 
 /* ------------------ Admin actions ------------------ */
-
 app.post("/admin/slots/:slotId/clear", requireAuth, requireRole("admin"), async (req, res) => {
-  await clearSlotReservation(Number(req.params.slotId));
+  const slotId = Number(req.params.slotId);
+  await clearSlotReservation(slotId);
+  // ❗ להחזיר לצבע ניטרלי ולהסיר שם/נעילה
+  await updateSlot(slotId, { label: "", color: "#e5e7eb", admin_lock: false });
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const active = !!req.body.active;
-  if (!active) { await clearSlotReservation(slotId); }
+  if (!active) {
+    await clearSlotReservation(slotId);
+    // ❗ גם בסגירה מאפסים צבע/שם/נעילה
+    await updateSlot(slotId, { label: "", color: "#e5e7eb", admin_lock: false });
+  }
   await setSlotActive(slotId, active);
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 // שינוי שם משבצת ע"י אדמין
 app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
   const slotId = Number(req.params.slotId);
   const label = (req.body.label ?? "").toString().trim();
   await clearSlotReservation(slotId);
-  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e0f2fe", admin_lock: !!label });
+  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e5e7eb", admin_lock: !!label });
   await broadcastSlots();
   return res.json({ ok: true });
 });
-
 // עדכון כללי למשבצת
 app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
   const payload = {
@@ -351,7 +330,6 @@ app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, r
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 // שעות: הוספה / שינוי / מחיקה
 app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, res) => {
   const tl = (req.body.time_label ?? "").toString().trim();
@@ -360,21 +338,17 @@ app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, r
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, res) => {
   let from = (req.body.from ?? req.body.time_label ?? "").toString().trim();
   const to  = (req.body.to ?? "").toString().trim();
   const slotId = req.body.slot_id ? Number(req.body.slot_id) : null;
-
   if (!/^[0-2]\d:\d{2}$/.test(from) && slotId) {
     const { rows } = await pool.query("SELECT time_label FROM slots WHERE id = $1", [slotId]);
     if (rows.length) from = rows[0].time_label;
   }
-
   if (!/^[0-2]\d:\d{2}$/.test(from) || !/^[0-2]\d:\d{2}$/.test(to)) {
     return res.status(400).send("HH:MM required");
   }
-
   try {
     await renameHour(from, to);
     await broadcastSlots();
@@ -383,7 +357,6 @@ app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, r
     res.status(409).send(e?.message || "Cannot rename hour");
   }
 });
-
 app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, res) => {
   const tl = (req.body.time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
@@ -391,9 +364,8 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
   await broadcastSlots();
   res.json({ ok: true });
 });
-
 // ניקוי כללי
-app.post("/admin/cleanup", requireAuth, requireRole("admin"), async (req, res) => {
+app.post("/admin/cleanup", requireAuth, requireRole("admin"), async (_req, res) => {
   try {
     await pool.query(`
       UPDATE slots s
@@ -410,11 +382,9 @@ app.post("/admin/cleanup", requireAuth, requireRole("admin"), async (req, res) =
 });
 
 /* ------------------ Web Push API ------------------ */
-
 app.get("/push/key", requireAuth, (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || "" });
 });
-
 app.post("/push/subscribe", requireAuth, async (req, res) => {
   const sub = {
     endpoint: req.body?.endpoint,
@@ -427,14 +397,12 @@ app.post("/push/subscribe", requireAuth, async (req, res) => {
   await savePushSubscription(req.session.user.id, sub);
   res.json({ ok: true });
 });
-
 app.post("/push/unsubscribe", requireAuth, async (req, res) => {
   const endpoint = req.body?.endpoint;
   if (!endpoint) return res.status(400).send("Missing endpoint");
   await removePushSubscription(req.session.user.id, endpoint);
   res.json({ ok: true });
 });
-
 app.post("/push/test", requireAuth, async (req, res) => {
   await sendPushToUser(req.session.user.id, {
     title: "בדיקת התראה",
@@ -446,7 +414,7 @@ app.post("/push/test", requireAuth, async (req, res) => {
 });
 
 /* ------------------ Errors & 404 ------------------ */
-app.use((err, req, res, next) => {
+app.use((err, _req, res, next) => {
   if (err && err.code === "EBADCSRFTOKEN") {
     return res.status(403).send("Invalid CSRF token");
   }
@@ -454,18 +422,12 @@ app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   res.status(500).send("Server error");
 });
-
-app.use((req, res) => res.status(404).send("Not Found"));
+app.use((_req, res) => res.status(404).send("Not Found"));
 
 httpServer.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
   const len = String(process.env.CRON_SECRET || "").trim().length;
   console.log(`[CRON] Secret set: ${len > 0 ? "yes" : "no"} (len=${len})`);
 });
-
-process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason);
-});
-process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err);
-});
+process.on("unhandledRejection", (reason) => console.error("[unhandledRejection]", reason));
+process.on("uncaughtException", (err) => console.error("[uncaughtException]", err));
