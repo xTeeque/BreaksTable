@@ -91,15 +91,17 @@ function getProvidedCronSecret(req) {
   const bearer = auth && auth.startsWith("Bearer ") ? auth.slice(7) : null;
   const qp = req.query?.key;
   const bodyKey = req.body?.key;
-  return h1 || bearer || qp || bodyKey || null;
+  // חיתוך רווחים/גרשיים שנדבקו חלילה
+  const val = h1 || bearer || qp || bodyKey || null;
+  return val == null ? null : String(val).trim();
 }
 function cronAuthorized(req) {
-  const expected = process.env.CRON_SECRET;
+  const expected = String(process.env.CRON_SECRET || "").trim();
   const provided = getProvidedCronSecret(req);
   return !!expected && provided === expected;
 }
 
-// בדיקת חיים פשוטה לשירותים חיצוניים / Render Health Check
+// בדיקת חיים פשוטה
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 
 // פינג לדיבוג התקנה
@@ -453,10 +455,10 @@ app.use((req, res) => res.status(404).send("Not Found"));
 
 httpServer.listen(PORT, HOST, () => {
   console.log(`Server running on http://${HOST}:${PORT}`);
-  console.log(`[CRON] Secret set: ${process.env.CRON_SECRET ? "yes" : "no"}`);
+  const len = String(process.env.CRON_SECRET || "").trim().length;
+  console.log(`[CRON] Secret set: ${len > 0 ? "yes" : "no"} (len=${len})`);
 });
 
-/* ---- לוגים נוחים לשגיאות שלא נתפסו ---- */
 process.on("unhandledRejection", (reason) => {
   console.error("[unhandledRejection]", reason);
 });
