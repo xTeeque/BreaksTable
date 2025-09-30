@@ -74,7 +74,12 @@ app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex"),
   resave: false,
   saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: "lax", secure: !!process.env.COOKIE_SECURE, maxAge: 1000*60*60*24*14 },
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: !!process.env.COOKIE_SECURE,
+    maxAge: 1000 * 60 * 60 * 24 * 14, // 14 ימים
+  },
 }));
 
 const csrfProtection = csrf();
@@ -94,6 +99,7 @@ app.get("/", requireAuth, async (req, res, next) => {
     res.render("dashboard", { slots, user: req.session.user, csrfToken: req.csrfToken() });
   } catch (e) { next(e); }
 });
+
 app.get("/dashboard", requireAuth, (req, res) => res.redirect("/"));
 
 app.get("/login", (req, res) => res.render("login", { csrfToken: req.csrfToken() }));
@@ -103,14 +109,20 @@ app.post("/login",
   body("password").isString().isLength({ min: 1 }),
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).render("login", { csrfToken: req.csrfToken(), error: "Invalid payload" });
+    if (!errors.isEmpty()) {
+      return res.status(400).render("login", { csrfToken: req.csrfToken(), error: "Invalid payload" });
+    }
 
     const email = safeLower(req.body.email);
     const user = await userByEmail(email);
-    if (!user) return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "User not found" });
+    if (!user) {
+      return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "User not found" });
+    }
 
     const ok = await bcrypt.compare(String(req.body.password), user.password_hash);
-    if (!ok) return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "Wrong password" });
+    if (!ok) {
+      return res.status(401).render("login", { csrfToken: req.csrfToken(), error: "Wrong password" });
+    }
 
     req.session.user = {
       id: user.id, email: user.email, role: user.role,
@@ -247,7 +259,40 @@ app.post("/admin/slots/:slotId/active", requireAuth, requireRole("admin"), async
   res.json({ ok: true });
 });
 
-// שינוי שם שעה
+// שינוי שם משבצת ע"י אדמין: מסיר משתמש קודם, נועל, מציג שם שנבחר, ירוק
+app.post("/admin/slots/:slotId/label", requireAuth, requireRole("admin"), async (req, res) => {
+  const slotId = Number(req.params.slotId);
+  const label = (req.body.label ?? "").toString().trim();
+  await clearSlotReservation(slotId);
+  await updateSlot(slotId, { label, color: label ? "#86efac" : "#e0f2fe", admin_lock: !!label });
+  await broadcastSlots();
+  return res.json({ ok: true });
+});
+
+// עדכון כללי למשבצת (אופציונלי)
+app.post("/admin/slots/update", requireAuth, requireRole("admin"), async (req, res) => {
+  const payload = {
+    slot_id: Number(req.body.slot_id),
+    label: nullableTrim(req.body.label),
+    color: nullableTrim(req.body.color),
+    time_label: nullableTrim(req.body.time_label),
+    col_index: req.body.col_index != null ? Number(req.body.col_index) : undefined,
+    row_index: req.body.row_index != null ? Number(req.body.row_index) : undefined,
+  };
+  await updateSlot(payload.slot_id, payload);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
+// שעות: הוספה / שינוי / מחיקה
+app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, res) => {
+  const tl = (req.body.time_label ?? "").toString().trim();
+  if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
+  await createHour(tl);
+  await broadcastSlots();
+  res.json({ ok: true });
+});
+
 app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, res) => {
   let from = (req.body.from ?? req.body.time_label ?? "").toString().trim();
   const to  = (req.body.to ?? "").toString().trim();
@@ -271,14 +316,6 @@ app.post("/admin/hours/rename", requireAuth, requireRole("admin"), async (req, r
   }
 });
 
-app.post("/admin/hours/create", requireAuth, requireRole("admin"), async (req, res) => {
-  const tl = (req.body.time_label ?? "").toString().trim();
-  if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
-  await createHour(tl);
-  await broadcastSlots();
-  res.json({ ok: true });
-});
-
 app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, res) => {
   const tl = (req.body.time_label ?? "").toString().trim();
   if (!/^[0-2]\d:\d{2}$/.test(tl)) return res.status(400).send("HH:MM required");
@@ -287,7 +324,7 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
   res.json({ ok: true });
 });
 
-// ניקוי כללי
+// ניקוי כללי: איפוס צבע/טקסט לכל משבצת שאינה תפוסה ואינה נעולה
 app.post("/admin/cleanup", requireAuth, requireRole("admin"), async (req, res) => {
   try {
     await pool.query(`
@@ -306,12 +343,12 @@ app.post("/admin/cleanup", requireAuth, requireRole("admin"), async (req, res) =
 
 /* ------------------ Web Push API ------------------ */
 
-// מפתח ציבורי (לא חובה בשימוש כי מעבירים דרך meta), טוב לדיבוג
+// מפתח ציבורי (לבדיקה/דיבוג)
 app.get("/push/key", requireAuth, (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || "" });
 });
 
-// רישום מנוי – חייב להיות לוגין + CSRF
+// רישום מנוי Push
 app.post("/push/subscribe", requireAuth, async (req, res) => {
   const sub = {
     endpoint: req.body?.endpoint,
@@ -325,7 +362,7 @@ app.post("/push/subscribe", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ביטול מנוי
+// ביטול מנוי Push
 app.post("/push/unsubscribe", requireAuth, async (req, res) => {
   const endpoint = req.body?.endpoint;
   if (!endpoint) return res.status(400).send("Missing endpoint");
