@@ -54,6 +54,7 @@ const app = express();
 const httpServer = httpPkg.createServer(app);
 const io = new SocketIOServer(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
+// broadcast helper
 async function broadcastSlots() {
   try { io.emit("slots:update", { at: Date.now() }); } catch (e) { console.error("broadcast error:", e); }
 }
@@ -157,7 +158,7 @@ app.get("/profile", requireAuth, (req, res) => {
   res.render("profile", {
     csrfToken: req.csrfToken(),
     user,
-    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || ""
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY || ""   // <-- כאן המפתח עובר לעמוד
   });
 });
 
@@ -302,7 +303,7 @@ app.post("/admin/hours/delete", requireAuth, requireRole("admin"), async (req, r
 
 /* ------------------ Web Push API ------------------ */
 
-// מעביר מפתח VAPID ציבורי לעמוד (אפשר גם דרך meta ב-profile)
+// להחזיר את ה־public key גם כ־JSON (fallback לקליינט)
 app.get("/push/key", requireAuth, (req, res) => {
   res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || "" });
 });
